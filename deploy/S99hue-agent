@@ -1,0 +1,47 @@
+#!/bin/sh
+# Install into /opt/etc/init.d only after the explicit service-install approval.
+BASE=/opt/var/lib/hue-agent
+PIDFILE="$BASE/agent.pid"
+LOG="$BASE/bootstrap.log"
+
+running() {
+    [ -f "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE")
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\000' ' ' < "/proc/$pid/cmdline" | grep -F -- 'hue_agent --config /opt/var/lib/hue-agent/config.json' >/dev/null
+}
+
+case "$1" in
+    start)
+        if running; then echo 'Hue agent already running'; exit 0; fi
+        umask 077
+        mkdir -p "$BASE"
+        # Rotate once per startup; no unbounded append across restarts.
+        [ ! -f "$LOG" ] || mv "$LOG" "$LOG.previous"
+        cd "$BASE" || exit 1
+        /opt/bin/python3 "$BASE/app/launch.py" "$BASE/config.json" || exit 1
+        # The owning Python process publishes agent.pid after acquiring its lock.
+        n=0
+        while [ "$n" -lt 20 ]; do
+            if running; then echo 'Hue agent started'; exit 0; fi
+            sleep 1
+            n=$((n+1))
+        done
+        echo 'Hue agent failed to publish its PID within 20 seconds'
+        exit 1
+        ;;
+    stop)
+        if running; then
+            kill -TERM "$pid"
+            n=0
+            while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 15 ]; do sleep 1; n=$((n+1)); done
+            if kill -0 "$pid" 2>/dev/null; then echo 'Agent still stopping; inspect it'; exit 1; fi
+        fi
+        rm -f "$PIDFILE"
+        echo 'Hue agent stopped'
+        ;;
+    restart) "$0" stop && "$0" start ;;
+    status) if running; then echo 'Hue agent running'; else echo 'Hue agent stopped'; exit 1; fi ;;
+    *) echo 'Usage: S99hue-agent start|stop|restart|status'; exit 1 ;;
+esac

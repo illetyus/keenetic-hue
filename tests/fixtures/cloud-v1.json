@@ -1,0 +1,24 @@
+{
+  "valid": [
+    {"operation":"query"},
+    {"operation":"set","on":false},
+    {"operation":"set","brightness":0,"expectedRaw":null},
+    {"operation":"set","brightness":1,"expectedRaw":3},
+    {"operation":"set","brightness":25,"expectedRaw":64},
+    {"operation":"set","brightness":40,"expectedRaw":102},
+    {"operation":"set","brightness":70,"expectedRaw":178},
+    {"operation":"set","brightness":75,"expectedRaw":190},
+    {"operation":"set","brightness":100,"expectedRaw":254}
+  ],
+  "invalid": [
+    {"operation":"set","brightness":true},
+    {"operation":"set","on":1},
+    {"operation":"set","brightness":-1},
+    {"operation":"set","brightness":101},
+    {"operation":"set","on":false,"brightness":40},
+    {"operation":"query","on":true},
+    {"operation":"toggle"},
+    {"operation":"set"},
+    {"operation":"query","extra":1}
+  ]
+}

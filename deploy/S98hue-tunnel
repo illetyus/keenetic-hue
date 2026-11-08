@@ -1,0 +1,74 @@
+#!/bin/sh
+BASE=/opt/var/lib/hue-tunnel
+SELF=/opt/etc/init.d/S98hue-tunnel
+PIDFILE="$BASE/supervisor.pid"
+CHILDPID="$BASE/tunnel.pid"
+running() {
+    [ -f "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE")
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\000' ' ' < "/proc/$pid/cmdline" | grep -F -- "$SELF supervise" >/dev/null
+}
+log_event() {
+    log="$BASE/supervisor.log"
+    if [ -f "$log" ] && [ "$(wc -c < "$log")" -ge 65536 ]; then mv "$log" "$log.previous"; fi
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "$log"
+}
+case "$1" in
+    start)
+        if running; then echo 'Hue Tunnel supervisor already running'; exit 0; fi
+        umask 077
+        /opt/bin/python3 "$BASE/tunnel-launch.py" || exit 1
+        n=0
+        while [ "$n" -lt 5 ]; do
+            if running; then echo 'Hue Tunnel supervisor started; connectivity requires health check'; exit 0; fi
+            sleep 1; n=$((n+1))
+        done
+        echo 'Hue Tunnel supervisor failed to publish PID'; exit 1
+        ;;
+    supervise)
+        # FD9 carries the launcher flock across exec; the network child never owns it.
+        [ -e "/proc/$$/fd/9" ] || exit 1
+        umask 077
+        child=''; sleeper=''
+        cleanup() {
+            trap '' TERM INT
+            if [ -n "$sleeper" ]; then kill -TERM "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null; fi
+            if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi
+            rm -f "$CHILDPID"
+            if [ -f "$PIDFILE" ] && [ "$(cat "$PIDFILE")" = "$$" ]; then rm -f "$PIDFILE"; fi
+            exit 0
+        }
+        trap cleanup TERM INT
+        echo "$$" > "$PIDFILE.new"; mv "$PIDFILE.new" "$PIDFILE"
+        export GOMAXPROCS=1
+        for ca in /opt/etc/ssl/cert.pem /opt/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt; do
+            if [ -f "$ca" ]; then export SSL_CERT_FILE="$ca"; break; fi
+        done
+        delay=2
+        while :; do
+            started=$(date +%s)
+            "$BASE/cloudflared" tunnel --no-autoupdate --protocol quic --edge-ip-version 4 --metrics 127.0.0.1:18790 --loglevel warn --logfile "$BASE/tunnel.log" run --token-file "$BASE/tunnel.token" 9>&- </dev/null >/dev/null 2>&1 &
+            child=$!; echo "$child" > "$CHILDPID.new"; mv "$CHILDPID.new" "$CHILDPID"
+            wait "$child"; result=$?; child=''; rm -f "$CHILDPID"
+            if [ $(($(date +%s)-started)) -ge 60 ]; then delay=2; fi
+            log_event "event=child_exit exit=$result retry_seconds=$delay"
+            sleep "$delay" & sleeper=$!; wait "$sleeper"; sleeper=''
+            delay=$((delay*2)); [ "$delay" -le 30 ] || delay=30
+        done
+        ;;
+    stop)
+        if running; then
+            kill -TERM "$pid"
+            n=0
+            while running && [ "$n" -lt 20 ]; do sleep 1; n=$((n+1)); done
+            if running; then echo 'Hue Tunnel still stopping'; exit 1; fi
+        fi
+        rm -f "$PIDFILE"
+        echo 'Hue Tunnel stopped'
+        ;;
+    restart) "$SELF" stop && "$SELF" start ;;
+    status) if running; then echo 'Hue Tunnel supervisor running; connectivity requires health check'; else echo 'Hue Tunnel stopped'; exit 1; fi ;;
+    *) echo 'Usage: S98hue-tunnel start|stop|restart|status'; exit 1 ;;
+esac

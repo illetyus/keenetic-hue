@@ -1,0 +1,21 @@
+{
+  "device_config": "/opt/var/lib/keenetic-hue-system/config/device.json",
+  "keystore": "/opt/var/lib/keenetic-hue-system/secrets/bond.json",
+  "journal": "/opt/var/lib/keenetic-hue-system/state/commands.sqlite",
+  "token_file": "/opt/var/lib/keenetic-hue-system/secrets/api.token",
+  "lock_file": "/opt/var/lib/keenetic-hue-system/run/adapter.lock",
+  "pid_file": "/opt/var/lib/keenetic-hue-system/run/agent.pid",
+  "log_file": "/opt/var/lib/keenetic-hue-system/logs/agent.log",
+  "transport": "usb:VID:PID!",
+  "address": "REPLACE_WITH_LAMP_BLE_ADDRESS",
+  "controller_public_address": "REPLACE_WITH_CONTROLLER_PUBLIC_ADDRESS",
+  "port": 8787,
+  "cloud": {
+    "enabled": false
+  },
+  "tunnel": {
+    "enabled": true,
+    "port": 8788,
+    "token_file": "/opt/var/lib/keenetic-hue-system/secrets/device.token"
+  }
+}

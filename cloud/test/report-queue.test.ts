@@ -1,0 +1,48 @@
+import {env} from 'cloudflare:workers';
+import {runInDurableObject} from 'cloudflare:test';
+import {it,expect} from 'vitest';
+import type {AuthStore} from '../src/oauth-store';
+it('report queue coalesces newer observations and never requeues an older failed report',async()=>{
+ const a=((env as any).HUE_AUTH as DurableObjectNamespace<AuthStore>).getByName(crypto.randomUUID());
+ const setup=await a.issueSetup();if(!setup.ok)throw Error('setup');
+ const f=await a.createFlow({clientId:'client',redirectUri:'https://redirect.test',state:'x',csrf:'csrf'});if(!f.ok)throw Error('flow');
+ const c=await a.consent({flowId:f.value.flowId,csrf:'csrf',setupCode:setup.value.code});if(!c.ok)throw Error('consent');
+ const t=await a.exchange({grant_type:'authorization_code',client_id:'client',redirect_uri:'https://redirect.test',code:c.value.code});if(!t.ok)throw Error('token');
+ const identity=(await a.authenticate(t.value.access_token))!;
+ await runInDurableObject(a,async(instance:any,state)=>{
+  instance.env.REPORT_STATE_ENABLED='true';instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';
+  const reports:any[]=[];let release!:()=>void;let started!:()=>void;const wait=new Promise<void>(r=>started=r);
+  instance.reporter={report:async(_owner:string,value:any)=>{reports.push(value);if(reports.length===1){started();await new Promise<void>(r=>release=r);throw Error('uncertain delivery');}}};
+  const stamp=Date.now()/1000;
+  await instance.queueReport(identity.grantId,{online:true,on:true,brightness:40,observedAt:stamp});
+  const alarm=instance.alarm();await wait;
+  await instance.queueReport(identity.grantId,{online:true,on:false,brightness:0,observedAt:stamp+0.1});
+  release();await alarm;await instance.alarm();
+  expect(reports).toEqual([{online:true,on:true,brightness:40},{online:true,on:false,brightness:0}]);
+  await instance.queueReport(identity.grantId,{online:true,on:true,brightness:40,observedAt:stamp});
+  expect(state.storage.sql.exec('SELECT * FROM oauth_report').toArray()).toHaveLength(0);
+  expect(await instance.reportStatus()).toMatchObject({enabled:true,linked:true,pending:0,last:{outcome:'accepted',observed:stamp+0.1}});
+ });
+});
+it('live-report check reads verified state without writing the device and compares HomeGraph state',async()=>{
+ const a=((env as any).HUE_AUTH as DurableObjectNamespace<AuthStore>).getByName(crypto.randomUUID());
+ const setup=await a.issueSetup();if(!setup.ok)throw Error('setup');
+ const f=await a.createFlow({clientId:'client',redirectUri:'https://redirect.test',state:'x',csrf:'csrf'});if(!f.ok)throw Error('flow');
+ const c=await a.consent({flowId:f.value.flowId,csrf:'csrf',setupCode:setup.value.code});if(!c.ok)throw Error('consent');
+ const t=await a.exchange({grant_type:'authorization_code',client_id:'client',redirect_uri:'https://redirect.test',code:c.value.code});if(!t.ok)throw Error('token');
+ const identity=(await a.authenticate(t.value.access_token))!;
+ await runInDurableObject(a,async(instance:any)=>{
+  instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';instance.env.REPORT_STATE_ENABLED='false';
+  let reports=0,offline=false,stored:any;
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(input:any)=>{expect(input.operation).toBe('query');return Response.json(offline?{commandId:input.requestId,status:'offline',errorCode:'BLE_OFFLINE'}:{commandId:input.requestId,status:'verified',deviceId:'hue-lwa017-01',on:false,brightness:0,brightnessRaw:254,observedAt:Date.now()/1000});}})};
+  instance.reporter={report:async(_owner:string,state:any)=>{reports++;stored=state;},query:async()=>stored};
+  instance.env.REPORT_STATE_ENABLED='true';
+  await instance.queueReport(identity.grantId,{online:true,on:true,brightness:40,observedAt:Date.now()/1000-0.1});
+  expect(await instance.checkReporting()).toMatchObject({reported:true,matched:true,state:{online:true,on:false,brightness:0}});
+  await instance.alarm();expect(stored).toEqual({online:true,on:false,brightness:0});
+  expect(reports).toBe(1);
+  instance.env.REPORT_STATE_ENABLED='false';
+  expect((await instance.reportStatus()).enabled).toBe(false);
+  offline=true;expect(await instance.checkReporting()).toMatchObject({reported:false,matched:false,errorCode:'DEVICE_UNAVAILABLE'});expect(reports).toBe(1);
+ });
+});

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Keenetic callback arguments only trigger a fixed sysfs rescan.
+case "${1-}" in
+    start|stop) exec /opt/bin/huectl usb-event >/dev/null 2>&1 ;;
+    *) exit 0 ;;
+esac

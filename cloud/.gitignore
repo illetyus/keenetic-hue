@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+.npm-cache/
+.wrangler-config/
+.dev.vars*
+.env*
+*.log
+wrangler.tunnel.jsonc
+wrangler.personal.jsonc

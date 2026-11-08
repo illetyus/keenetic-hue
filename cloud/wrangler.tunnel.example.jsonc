@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "keenetic-hue-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-28",
+  "workers_dev": true,
+  "durable_objects": {"bindings": [{"name": "HUE_RELAY", "class_name": "Relay"}, {"name": "HUE_AUTH", "class_name": "AuthStore"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["Relay"]}, {"tag": "v2-oauth", "new_sqlite_classes": ["AuthStore"]}],
+  "vpc_services": [{"binding": "HUE_TUNNEL", "service_id": "REPLACE_WITH_YOUR_VPC_SERVICE_ID"}],
+  "vars": {
+    "CONTROL_ENABLED": "true",
+    "GOOGLE_ENABLED": "true",
+    "GOOGLE_QUEUE_ENABLED": "true",
+    "GOOGLE_PROJECT_ID": "REPLACE_WITH_YOUR_GOOGLE_PROJECT_ID",
+    "OAUTH_CLIENT_ID": "REPLACE_WITH_YOUR_OAUTH_CLIENT_ID",
+    "PUBLIC_ORIGIN": "https://REPLACE-WITH-YOUR-WORKER.ACCOUNT.workers.dev",
+    "REPORT_STATE_ENABLED": "true"
+  },
+  "triggers": {"crons": ["* * * * *"]},
+  "observability": {"enabled": false}
+}
