@@ -4,5 +4,5 @@
   "private":true,
   "type":"module",
   "scripts":{"test":"vitest run","typecheck":"tsc --noEmit","dry-run":"wrangler deploy --dry-run"},
-  "devDependencies":{"@cloudflare/vitest-plugin":"1.4.9","@cloudflare/workers-types":"5.20261028.1","typescript":"7.0.2","vitest":"4.1.12","wrangler":"4.154.0"}
+  "devDependencies":{"@cloudflare/vitest-plugin":"1.4.9","@cloudflare/workers-types":"5.20261028.1","typescript":"7.0.2","vitest":"4.1.12","wrangler":"4.157.0"}
 }
