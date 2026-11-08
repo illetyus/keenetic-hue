@@ -4,7 +4,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
     groups:
       github-actions:
         patterns:
@@ -13,8 +13,12 @@ updates:
     directory: /cloud
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 1
     groups:
       cloud-dev-dependencies:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "vitest"
+        update-types:
+          - "version-update:semver-major"
