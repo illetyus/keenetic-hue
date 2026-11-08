@@ -1,65 +1,63 @@
-# RAM üzerinden USB bakım paketini hazırlama
+# Preparing the RAM-Based USB Storage Maintenance Helper
 
-`deploy/storage_ram_prepare.py`, gelişmiş USB dosya sistemi bakımında gereken
-Python ve doğrulanmış kontrol araçlarını Keenetic'in RAM'ine hazırlayan bilgisayar
-tarafı yardımcısıdır. Normal Hue kurulumu, lambanın kontrolü ve otomatik başlangıç
-bu betiğe bağlı değildir. Betik imzalı router paketine dahil edilmez.
+`deploy/storage_ram_prepare.py` is an optional workstation-side helper that stages
+Python and verified filesystem check tools into Keenetic RAM (`/tmp`) for advanced
+offline USB filesystem maintenance. Normal Hue installation, daily lamp control, and
+automatic boot startup do **not** depend on this script, and it is not included in
+the signed `.huerel` router bundle.
 
-## Önce kendi bağlantı bilgilerini doldur
+## 1. Configure Local SSH Connection Settings
 
-Depo kökünde örnek dosyanın yerel kopyasını oluştur. PowerShell için:
+Create a git-ignored local settings copy from the repository root:
 
 ```powershell
 Copy-Item deploy/storage-ram.example.json .storage-ram.local.json
 ```
 
-`.storage-ram.local.json` dosyasını bir metin düzenleyiciyle açıp bütün alanları
-kendi sistemine göre doldur:
+Populate `.storage-ram.local.json` with your environment's connection details:
 
-| Alan | Yazılacak bilgi |
+| Field | Description |
 | --- | --- |
-| `ssh_host` | Keenetic'in kendi ağındaki IP adresi veya ana bilgisayar adı. |
-| `ssh_port` | Entware SSH sunucusunun portu; JSON tamsayısı olmalı. Keenetic OS CLI portuyla aynı olduğu varsayılmaz. |
-| `ssh_user` | Entware'e girişte kullandığın SSH kullanıcı adı. |
-| `ssh_key_path` | Bilgisayarındaki SSH özel anahtar dosyasının yolu; anahtarın içeriği veya parola değil. |
+| `ssh_host` | LAN IP address or hostname of your Keenetic router |
+| `ssh_port` | Entware SSH server port as a JSON integer (distinct from the Keenetic OS CLI port) |
+| `ssh_user` | Entware SSH username |
+| `ssh_key_path` | Path to your local SSH private key file (never the key contents or passphrase) |
 
-Windows dosya yollarını JSON içinde `C:/klasor/anahtar` biçiminde yazabilirsin.
-Göreli anahtar yolları ayar dosyasının bulunduğu klasöre göre çözülür; `~` ev
-klasörüne genişletilir. Betik anahtar dosyasını değiştirmez. Anahtarın işletim
-sistemindeki özel erişim izinlerini koru.
+On Windows, write paths using forward slashes (`C:/path/to/id_ed25519`). Relative
+paths resolve against the settings file directory, and `~` expands to your home
+directory. The script never modifies your SSH key file.
 
-Boş örnek çalıştırılabilir bir yapılandırma değildir. Ayar eksik/hatalıysa veya
-anahtar dosyası yoksa betik, araç yükünü okumadan ve SSH bağlantısı kurmadan
-`STORAGE_SETTINGS_...` hatasıyla durur. Hazır bir adres veya anahtar yolu seçmez.
+The empty `deploy/storage-ram.example.json` file is intentionally non-executable. If
+any setting is missing or invalid, the script stops immediately with a
+`STORAGE_SETTINGS_...` error before reading payload files or opening an SSH
+connection.
 
-SSH hedefinin sunucu anahtarını önce güvenilir yolla doğrulayıp kendi OpenSSH
-`known_hosts` kaydına ekle. Betik `StrictHostKeyChecking=yes`, `IdentitiesOnly=yes`
-ve `BatchMode=yes` kullanır; bilinmeyen anahtarı otomatik kabul etmez.
+Verify the router's SSH host key fingerprint through a trusted channel and add it to
+your OpenSSH `known_hosts` beforehand. The helper enforces
+`StrictHostKeyChecking=yes`, `IdentitiesOnly=yes`, and `BatchMode=yes`.
 
-`.storage-ram.local.*` dosyaları Git tarafından yok sayılır. Kendi adresini ve
-anahtar yolunu doldurduğun dosyayı veya bakım günlüklerini repoya ekleme. Başka
-adla bir ayar/günlük dosyası kullanırsan onu ayrıca Git dışında tut.
+`.storage-ram.local.*` files are ignored by Git. Never commit personal IP addresses,
+key paths, or maintenance logs to the repository.
 
-## Kullanım
+## 2. Usage
 
-Bilgisayarda Python ve OpenSSH istemcisi, Keenetic'te mevcut anahtarlı Entware
-SSH erişimi gerekir. `TOOL_PAYLOAD.json`, betiğin sabitlenmiş araç özetleriyle
-eşleşen IPK oluşturucusunun araç yükü olmalıdır; rastgele bir dosya değildir.
+Requires Python and the OpenSSH client on your workstation, plus key-based Entware
+SSH access on the Keenetic router. `TOOL_PAYLOAD.json` must match the pinned IPK
+tool digests verified by the script.
 
-Depo kökünde yalnız hazırlık için:
+To stage the RAM maintenance bundle without starting a filesystem check:
 
 ```sh
 python deploy/storage_ram_prepare.py TOOL_PAYLOAD.json
 ```
 
-Başka bir yerel ayar dosyası veya isteğe bağlı günlük için:
+To specify a custom local settings file or log file:
 
 ```sh
 python deploy/storage_ram_prepare.py TOOL_PAYLOAD.json --settings LOCAL_SETTINGS.json --log-file .storage-ram.local.log
 ```
 
-Varsayılan `--action prepare` yalnız RAM bakım paketini hazırlar; kontrolü
-başlatmaz. `--action start` ayrı bir açık işlem olarak bakım akışını başlatır.
-`--action status --operation-id OPERATION_ID`, ilgili işlem kimliğiyle durumu
-sorgular. Kaynak, araç özeti ve izin doğrulamaları değişmez; biçimlendirme aracı
-bakım yüküne alınmaz. Bu yardımcı betiği rutin lamba açma/kapatma amacıyla kullanma.
+The default `--action prepare` stages the RAM maintenance environment only.
+`--action start` initiates the maintenance workflow as a separate explicit step, and
+`--action status --operation-id OPERATION_ID` queries operation status. Formatting
+utilities (`mke2fs`) are excluded from the maintenance payload.

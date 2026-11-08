@@ -1,55 +1,78 @@
-# Kurulum ve dosya düzeni
+# Installation and File Layout
 
-Bu kurulum yolu imzalı RC12 paketini ve bağımsız doğrulanmış açık anahtarı kullanır. Entware ve bağımlılıklar için [hazırlık adımlarını](reinstall.md#2-entwarei-hazırlama) izle.
+This installation workflow uses the signed RC12 bundle and an independently
+verified Ed25519 public key. For Entware preparation and runtime dependencies,
+first follow the [preparation steps](reinstall.md#2-preparing-entware).
 
-Entware yönetim erişiminde anahtar kullanın ve SSH erişimini yönetim ağıyla sınırlayın.
+Use SSH key authentication for Entware administration and restrict SSH access to
+your management network.
 
-Bu proje Keenetic'in Entware/Linux ortamında yerel süreçler olarak çalışır. Sistem dosyaları tek köktedir:
+Keenetic Hue runs as isolated local processes inside Keenetic's Entware/Linux
+environment under a single unified root:
 
 ```text
 /opt/var/lib/keenetic-hue-system/
-  releases/VERSION/  imzalı, sürüme ait uygulama dosyaları
-  manager/           seçili sürümü doğrulayan sabit CLI/kurtarma katmanı
-  config/            cihaz, ajan, yönetim ve açık doğrulama anahtarı
-  secrets/           BLE bond ve dar kapsamlı token dosyaları
-  state/             komut günlüğü, şema ve bakım makbuzları
-  run/               süreç kimlikleri ve kilitler
-  logs/              sınırlandırılmış günlükler
-  backups/           özel geri dönüş kopyaları ve şifreli yedekler
-  active.json        seçili sürüm ve varsa önceki sürüm
+  releases/VERSION/  signed, version-specific application payloads
+  manager/           stable CLI and recovery layer verifying the selected release
+  config/            device, agent, management configuration and release trust public key
+  secrets/           BLE bond and narrowly scoped token files
+  state/             command journal, schema metadata and maintenance receipts
+  run/               process ownership records, sockets and locks
+  logs/              size-bounded operational and lifecycle logs
+  backups/           private rollback copies and encrypted .huebak archives
+  active.json        currently selected release and previous fallback release
 ```
 
-`/opt/bin/huectl` yönetim girişidir. `/opt/etc/init.d/S97keenetic-hue`, Entware açılırken `internal-service start` çağırır. Ajan ve Tunnel ayrı yaşam süresi kilitleriyle gözetilir. Bir bileşenin yeniden başlaması diğerinin yeniden başlamasını zorunlu kılmaz. PID dosyasındaki sayıya tek başına güvenilmez; süreç argümanları, açılış kimliği ve süreç başlangıç zamanı doğrulanır.
+`/opt/bin/huectl` is the operator entry point. `/opt/etc/init.d/S97keenetic-hue`
+invokes `internal-service start` when Entware boots. The BLE agent and Tunnel are
+supervised under separate lifecycle locks; restarting one component does not force
+the other to restart. A PID file number is never trusted on its own—process
+arguments, kernel `boot_id`, and process `startTicks` are verified together.
 
-`config.example.json`, yalnızca birleşik ajan yapılandırmasının alan ve dosya yolu örneğidir. İçindeki adapter/lamba adresleri kasıtlı olarak yer tutucudur; dosyayı çalışır yapılandırma diye kopyalama. Desteklenen yeniden kurulum, imzalı sürüm paketi ile aynı Hue kurulumuna ait şifreli yedeği kullanır; elle bond, adres veya token üretip yapılandırmaya yazma.
+`config.example.json` is only a structural schema example showing field names and
+paths. Its adapter and lamp addresses are intentional placeholders; do not copy it
+as a working configuration. Supported reinstallation uses the signed release bundle
+together with an encrypted `.huebak` backup from the same Hue installation—never
+manually invent BLE bonds, MAC addresses, or tokens.
 
-## Gerekli teslim dosyaları
+## Required Delivery Artifacts
 
-- İmzalı `keenetic-hue-VERSION.huerel` yazılım paketi.
-- `keys/release-trust.pub` açık anahtarı.
-- `deploy/install_release.py` bağımsız, güvenilir kurulum/kurtarma aracı.
-- Yeni USB'ye dönüş için ayrıca kişisel parolalı `.huebak` yedeği.
+- Signed `keenetic-hue-VERSION.huerel` software bundle.
+- `keys/release-trust.pub` Ed25519 public verification key.
+- `deploy/install_release.py` standalone trusted bootstrap/recovery installer.
+- For migration to a new USB drive, your password-protected personal `.huebak` backup.
 
-Yazılım paketi özel yapılandırma veya kimlik bilgisi taşımaz. İlk kurulumda açık anahtarın SHA-256 parmak izi ayrı bir güvenilir kaynaktan doğrulanır. Mevcut anahtar sessizce değiştirilmez. Bu geliştirme kurulumunun açık anahtar parmak izi:
+The software bundle carries no private configuration or credentials. On first
+installation, verify the SHA-256 fingerprint of the public key through an
+independent trusted channel; an existing trust key is never silently overwritten.
+The public key fingerprint for this release line is:
 
 ```text
 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be
 ```
 
-Özel imzalama anahtarı cihazın günlük yönetimi için gerekmez. Güvenli bir yedekte tutulur; USB'ye, pakete veya depoya konmaz.
+The private signing key is never needed for router operation. Keep it in offline
+secure storage—never on the router USB drive, inside a package, or in the repository.
 
-## İmzalı yazılımı hazırlama
+## Preparing the Signed Software
 
-Entware ve paket profilindeki bağımlılıklar kurulduktan sonra dosyaları SFTP ile yalnız root'un erişebildiği bir klasöre kopyala:
+After installing Entware and the pinned dependencies, copy the release artifacts via
+SFTP into a `root`-only staging directory:
 
 ```sh
 mkdir -p /opt/var/tmp/hue-install
 chmod 700 /opt/var/tmp/hue-install
 ```
 
-Arşivi ve açık anahtarı aktarım dizinine koy. Kurucuyu ayrı olarak, yalnız root'un yazabildiği `/opt/var/lib/keenetic-hue-trusted` dizinine aktar. Bu dizini root olarak `0700` izinleriyle oluştur ve üst dizinlerin de yetkisiz yazmaya kapalı olduğunu doğrula.
+Place the `.huerel` archive and `release-trust.pub` in `/opt/var/tmp/hue-install`.
+Copy `install_release.py` separately into `/opt/var/lib/keenetic-hue-trusted`,
+created as `root` with `0700` permissions (verifying that parent directories are not
+writable by unprivileged users).
 
-Güvenilen iş istasyonunda incelenmiş `deploy/install_release.py` kopyasının SHA-256 özetini `Get-FileHash -Algorithm SHA256 .\deploy\install_release.py` ile hesapla. `INSTALLER_SHA256` alanına bu özeti yaz. `VERSION` ve `PUBLIC_KEY_SHA256` alanlarını teslim edilen sürüm ve bağımsız doğruladığın açık anahtar parmak iziyle değiştir. Kurucu yalnızca özet kontrolü başarılı olursa çalışır:
+On your trusted workstation, compute the SHA-256 digest of your reviewed
+`deploy/install_release.py` copy (`Get-FileHash -Algorithm SHA256 .\deploy\install_release.py`
+or `sha256sum deploy/install_release.py`). Replace `INSTALLER_SHA256`, `VERSION`,
+and `PUBLIC_KEY_SHA256` below; the installer runs only if the hash check succeeds:
 
 ```sh
 printf '%s  %s\n' 'INSTALLER_SHA256' /opt/var/lib/keenetic-hue-trusted/install_release.py | sha256sum -c - && \
@@ -59,12 +82,31 @@ python3 -I /opt/var/lib/keenetic-hue-trusted/install_release.py \
   --trust-key-sha256 PUBLIC_KEY_SHA256
 ```
 
-Bu adım paketi doğrular, sürüm yuvasını ve yönetim girişlerini kurar; boş kurulumda ampul kimliği veya token üretmez, ajanı kendiliğinden eşleştirmez. Mevcut bir cihazı taşıyorsan [özel yedekten yeniden kurulum](reinstall.md) adımlarına geç. Hiç yedeğin yoksa önce donanıma özgü BLE eşleştirmesi ve özel yapılandırma gerekir. Bu sürümde bunları sıfırdan üreten doğrulanmış bir kurulum komutu yoktur.
+This step verifies the Ed25519 signature, installs the release slot, and sets up the
+manager entry points and service principals. On an empty installation it does not
+generate lamp identities or tokens or auto-pair a bulb. If you are migrating an
+existing installation, proceed to [reinstallation from an encrypted backup](reinstall.md).
+If you have no backup, hardware-specific BLE pairing and private configuration must
+be provisioned separately.
 
-Desteklenen eski üç klasörlü kurulumdan ilk geçişte aynı komuta `--migrate-existing` eklenir. Bu seçenek rastgele dosya yollarını içe aktarmaz. Eski girişler yedeklenir, iki eski sahip durdurulur, adaptör kilidi denetlenir, kimlikler korunarak yeni köke kopyalanır. Yeni sürümün BLE ve Tunnel sağlığı doğrulanır; eski klasörler ancak sonra `backups/migration-*/legacy/` altına alınır. Başarısızlıkta geri dönülür. Mevcut birleşik kurulumda normal sürüm değişikliği için [güncelleme komutunu](update-rollback.md) kullan.
+When migrating for the first time from the legacy three-directory layout, append
+`--migrate-existing` to the command above. That option does not import arbitrary
+paths: it backs up legacy entries, stops legacy owners, checks the adapter lock,
+and copies credentials into the unified root while preserving permissions. Legacy
+directories are moved under `backups/migration-*/legacy/` only after BLE and Tunnel
+health pass on the new release; otherwise the migration rolls back. For normal
+version upgrades on an existing unified root, use [`huectl update`](update-rollback.md).
 
-## Kurtarma katmanı yarıda kalırsa
+## If the Recovery Layer Is Interrupted
 
-Normal bakım kesintisinde `huectl recover` veya bir sonraki `S97` başlangıcı makbuzları işler. Yönetim klasörünün değişimi sırasında CLI dosyası geçici olarak yoksa aynı doğrulanmış arşiv, açık anahtar ve bağımsız `install_release.py` komutunu yeniden çalıştır. Eski yönetim kodu `backups/bootstrap-*` içinde korunur. Arşivi ve bağımsız aracı USB dışında da sakla.
+After an interrupted maintenance operation, `huectl recover` or the next `S97` boot
+processes pending receipts. If the CLI binary is temporarily absent during a manager
+swap, re-run the same verified archive, public key, and standalone
+`install_release.py` command above. Previous manager code is preserved under
+`backups/bootstrap-*`. Keep copies of the signed archive and standalone installer
+outside the router USB drive as well.
 
-İmza veya sürüm kontrolünü kapatarak kurtarma yapma. Hata çıktısı kimlik bilgilerini göstermez; önce dosyaların doğru sürüm/anahtara ait olduğunu, özel izinleri, boş disk ve RAM'i kontrol et. Modem fabrika ayarına döndürülmez; ampul sıfırlanmaz.
+Never bypass signature or version checks to force recovery. Error outputs omit
+sensitive values; first check that files match the expected version and trust key,
+and verify private permissions, free disk space, and available RAM. Never factory-reset
+the router or reset the Hue bulb during routine software recovery.

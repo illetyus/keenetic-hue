@@ -1,32 +1,41 @@
-# Mimari ve sınırlar
+# Architecture and Trust Boundaries
 
-![Bileşenler ve veri akışı](assets/architecture.svg)
+![Components and data flow](assets/architecture.svg)
 
-Google Home komutu, kullanıcıya ait geliştirme entegrasyonu üzerinden Worker'a
-gelir. Worker OAuth bağını ve komut akışını yönetir; Tunnel'ın dışarı doğru
-kurduğu bağlantıyla Keenetic'teki yerel uçla konuşur. Entware ajanı USB Bluetooth
-adaptörüyle ampulü kontrol eder. HomeGraph bildirimi ayrı doğrulanır.
+A Google Home command arrives at the Cloudflare Worker through the user's personal
+development integration. The Worker manages OAuth account linking and the command
+queue, communicating with the local endpoint on the Keenetic router over a
+router-initiated outbound Cloudflare Tunnel. On the router, the Entware agent
+controls the Hue lamp through a USB Bluetooth HCI adapter. HomeGraph state
+reporting is verified independently.
 
-| Katman | Sorumluluk |
+| Layer | Responsibility |
 | --- | --- |
-| Google / Worker | Hesap bağlama, sınırlı komut yetkisi, durum raporlama |
-| Tunnel | Yerel uca ağ yolu; tek başına komut yetkilendirmesi değildir |
-| Yönetim | İmzalı sürüm, kimlik/izin, atomik seçim, yedek/kurtarma |
-| Ajan kimliği | BLE işlemleri ve ajan veritabanı |
-| Fiziksel dünya | Ampul elektriği, adaptör, radyo bağlantısı ve dış müdahale |
+| Google / Worker | Account linking, scoped command authorization, HomeGraph state reporting |
+| Tunnel | Outbound network path to the local endpoint; not command authorization by itself |
+| Manager (`hue_admin`) | Signed release verification, service principals/permissions, atomic slot selection, backup/recovery |
+| Agent identity (`hue-agent`) | BLE GATT operations and the local command journal database |
+| Physical world | Lamp mains power, USB adapter, radio link, and external power switches |
 
-PID tek başına sahiplik kanıtı değildir; boot kimliği, süreç başlangıcı,
-argümanlar ve beklenen kimlik doğrulanır. Günlükler sınırlıdır; kapanış kanıtı
-yoksa neden bilinmez. Kuyruğa kabul, fiziksel tamamlanma anlamına gelmez.
-`verified` son okumaların istenen durumla eşleşmesidir. Belirsiz sonuç
-`OUTCOME_UNKNOWN` olarak saklanır ve otomatik tekrar gönderilmez.
+A PID number alone is not proof of process ownership: boot identity (`boot_id`),
+process start time (`startTicks`), command-line arguments, and the expected UID/GID
+principal are verified together. Logs are bounded; if no terminal signal record
+exists, the termination cause is reported as unknown rather than fabricated.
+Accepting a command into a queue does not mean physical completion: `verified`
+requires final GATT readbacks to match all requested state fields. An uncertain
+physical outcome is recorded as `OUTCOME_UNKNOWN` and is never automatically
+replayed.
 
-Sıcak SQLite journal kalırsa root özgün DB/journal çiftini opak özel dosyalar
-olarak korur. Yalnız geçici kopya, ayrı ajan kimliği ve kaynak sınırlarıyla
-kurtarılır. Şema/bütünlük doğrulanmadan kanonik durum değiştirilmez. Eski runtime
-saklanmadan yeni DB ile eski journal birleştirilmez. Ajan başarısızsa birlikte
-başlangıçta Tunnel atlanır.
+If a hot SQLite rollback journal remains after an unexpected stop, `root`
+preserves the original database and journal pair together as opaque private files
+(`0700` directory / `0600` files) before any recovery attempt. Recovery runs
+exclusively on a staged copy under the dedicated `hue-agent` identity with strict
+resource limits. Canonical state is never replaced until schema and integrity
+checks pass, and a new database is never paired with a stale rollback journal.
+During joint startup, Tunnel startup is skipped if agent startup fails.
 
-RC12 mevcut kurulumda komut/reboot kabulünü geçti. Bu, yeni hesapları veya
-her kesinti türünü doğrulamaz. İlk tarihsel supervisor kaybının tetikleyicisi
-bilinmiyor; düzeltilen sorun kanıtlanan kurtarma kilitlenmesi ve tanı eksikliğidir.
+RC12 passed live command and router reboot acceptance on the existing personal
+installation. This does not pre-certify fresh cloud accounts or every possible
+hardware interruption. The initial historical supervisor disappearance trigger
+was unrecorded and remains unknown; the proven fix addresses the recovery deadlock
+and lifecycle diagnostic gap.

@@ -1,41 +1,55 @@
-# Günlük bakım — hızlı başvuru
+# Daily Maintenance — Quick Reference
 
-Bu hızlı başvuru, birleşik Keenetic Hue kurulumu ve RC12 yönetim komutları içindir. Boş bir Entware ortamında önce [kurulum kılavuzunu](installation.md) izle.
+This quick reference covers routine operation of the unified Keenetic Hue
+installation and RC12 `huectl` management commands. On an empty Entware root,
+follow the [installation guide](installation.md) first.
 
-Bu sayfadaki komutları Keenetic'e SSH ile bağlanıp etkileşimli terminalde çalıştır. Parolayı, kurulum kodunu veya token'ı komut satırına yazma; araç gizli giriş gerektiğinde kendisi sorar. Ayrıntılı işlem ve hata adımları ilgili kılavuzlarda bulunur.
+Run these commands over SSH in an interactive Entware terminal. Never pass
+passwords, setup codes, or tokens on the command line; `huectl` prompts privately
+when secret input is required.
 
-## Sağlık ve durum
+## Health and Status
 
 ```sh
 huectl status
 huectl health --live --json
 ```
 
-`health` çıktısındaki `healthy: true` sağlıklı yerel durumu, çıkış kodu `0` başarılı sorguyu gösterir. `status` ve `health` ampule yazma komutu göndermez. Google Home/HomeGraph kabulünü tek başlarına kanıtlamazlar.
+In the `health` output, `healthy: true` and exit code `0` confirm healthy local
+state. Neither `status` nor `health` sends a write command to the bulb, and they
+do not by themselves prove cloud HomeGraph report acceptance.
 
-## Google Home için yeni bağlama kodu
+## Issuing a New One-Time Google Home Setup Code
 
-Yalnızca Google Home hesabını ilk kez bağlarken veya yeniden bağlarken gerekir:
+Required only when linking or re-linking your Google Home account:
 
 ```sh
 huectl setup-code
 ```
 
-Komut terminalde tek kullanımlık kodu ve `600` saniyelik geçerliliği gösterir. Kod bir kez kullanılabilir; ekrana gelen kodu Google Home'daki `[test] Keenetic Hue` sağlayıcısına gir. Komut TTY dışında çalışmayı reddeder; kodu dosyaya veya loga yönlendirme. Bu günlük işlem için AI veya MCP gerekmez. Ayrıntı: [Google Home ve kurulum kodu](google-home.md).
+The command displays a one-time code valid for `600` seconds. Enter the code in
+the Google Home app under the `[test] Keenetic Hue` provider. The command refuses
+to run outside a TTY—never redirect the code to a file or log. No AI or MCP tool
+is required for routine code issuance. Details: [Google Home account linking](google-home.md).
 
-## Şifreli yedek oluşturma
+## Creating an Encrypted Backup
 
 ```sh
 mkdir -p /opt/var/lib/keenetic-hue-system/backups
 chmod 700 /opt/var/lib/keenetic-hue-system/backups
-huectl backup /opt/var/lib/keenetic-hue-system/backups/hue-20261102.huebak
+huectl backup /opt/var/lib/keenetic-hue-system/backups/hue-20261108.huebak
 ```
 
-Örnekteki tarihi yedeği aldığın günün tarihiyle değiştir. Komut parolayı gizli olarak iki kez sorar. Parola yöneticisinde sakla; `.huebak` dosyasını USB dışında da güvenli bir yerde tut. Yedek içeriğini, parolasını veya token'ları destek mesajlarında paylaşma. Ayrıntı: [şifreli yedek ve geri yükleme](backup-restore.md).
+Replace the date in the filename with the current date. `huectl` prompts twice for
+a backup passphrase (minimum 16 characters). Store the passphrase in a password
+manager and copy the `.huebak` archive off the router USB drive to secure offline
+storage. Never share backup archives, passphrases, or tokens in support messages.
+Details: [Encrypted backup and restore](backup-restore.md).
 
-## Var olan kuruluma yedek geri yükleme
+## Restoring a Backup to an Existing Installation
 
-Önce doğrulama provası, ardından gerçek geri yükleme ve sağlık sorgusu:
+Always run a verification dry-run first, followed by the actual restore and live
+health check:
 
 ```sh
 huectl restore /path/to/backup.huebak --dry-run
@@ -43,11 +57,15 @@ huectl restore /path/to/backup.huebak
 huectl health --live --json
 ```
 
-Parola gizli terminal isteminde sorulur. Bu yol aynı cihaz düzeni içindir; boş Entware kurulumu veya USB kaybından dönüş için [yeniden kurulum kılavuzunu](reinstall.md) izle.
+The passphrase is requested via a hidden terminal prompt. This path applies to an
+existing installation with the same hardware profile; for a clean Entware root or
+after USB drive loss, follow the [reinstallation guide](reinstall.md).
 
-## İmzalı güncelleme ve geri alma
+## Signed Updates and Rollback
 
-Güncellemeden önce yeni yedek al. İmzalı `.huerel` paketini SFTP ile `/opt/var/tmp/hue-install/` altına kopyala, `VERSION` kısmını gerçek dosya adıyla değiştir:
+Create a fresh backup before updating. Copy the signed `.huerel` package via SFTP
+into `/opt/var/tmp/hue-install/` and replace `VERSION` with the actual release
+filename:
 
 ```sh
 huectl health --live --json
@@ -55,22 +73,29 @@ huectl update /opt/var/tmp/hue-install/keenetic-hue-VERSION.huerel
 huectl health --live --json
 ```
 
-Yeni sürüm sağlığı kabul etmezse araç kayıtlı önceki sürüme döner. Elle önceki doğrulanmış sürümü seçmek için:
+If the new release does not pass live health verification within the acceptance
+window, `huectl` automatically stops the new processes and rolls back to the
+previous verified release. To manually switch back to the recorded previous
+release:
 
 ```sh
 huectl rollback
 huectl health --live --json
 ```
 
-Yarım kalan yerel bakım işlemini inceleyip kurtarmak için:
+To inspect and recover an interrupted local maintenance operation:
 
 ```sh
 huectl recover
 huectl health --live --json
 ```
 
-Ayrıntılı sürüm sırası, uyumluluk yolu ve hata açıklamaları: [güncelleme, onarım ve geri alma](update-rollback.md).
+Detailed release sequence rules, compatibility paths, and failure semantics:
+[Signed updates, repair, and rollback](update-rollback.md).
 
-## Yeniden kurulum
+## Reinstallation
 
-Yalnızca yedek USB/Entware kaybından sonra [yeniden kurulum kılavuzunu](reinstall.md) kullan. Yeni USB'yi çalışan USB'den ayrı hazırlamak gerekir. Ampulü sıfırlama veya yeniden eşleştirme, aynı donanım ve geçerli özel yedekle yapılan normal yeniden kurulumun parçası değildir.
+Use the [reinstallation guide](reinstall.md) only after Entware USB storage loss.
+Prepare a replacement USB drive separately from the working drive. Resetting or
+re-pairing the Hue bulb is not part of normal reinstallation when using the same
+hardware and a valid encrypted `.huebak` backup.

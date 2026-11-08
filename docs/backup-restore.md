@@ -1,128 +1,128 @@
-# Yedek, geri yükleme ve yeni USB
+# Encrypted Backups, Restore, and Migrating to a New USB Drive
 
-Bir sürüm paketini kullanırken paketin kurulum komutunu, doğrulama
-anahtarı özetini ve sürüm kimliğini esas al. Kişisel arşivi doğrulamak için
-aşağıdaki kuru çalıştırmayı kullan. Bu adım arşivi açar ve dosyaları doğrular.
+When working with a signed release bundle, always use the release's documented
+installer command, public key SHA-256 fingerprint, and release ID. Before applying
+a personal `.huebak` backup, run `--dry-run` to decrypt and validate the archive
+without modifying running services.
 
-## Kişisel şifreli yedek
+## Creating a Personal Encrypted Backup
 
-Keenetic'in anahtarla giriş yaptığın Entware terminalinde:
+In an interactive Entware SSH terminal on the Keenetic router:
 
 ```sh
 mkdir -p /opt/var/lib/keenetic-hue-system/backups
 chmod 700 /opt/var/lib/keenetic-hue-system/backups
-huectl backup /opt/var/lib/keenetic-hue-system/backups/benim-yedegim.huebak
+huectl backup /opt/var/lib/keenetic-hue-system/backups/my-backup.huebak
 ```
 
-En az 16 karakterli yedek parolasını terminalde belirle. Parola ve yedeği ayrı
-sakla; ikisini de GitHub'a koyma. Aynı dosya adına ikinci kez yazılmaz.
-Dosyayı SFTP ile PC'ye alıp USB'den ayrı bir yerde koru. Yeni USB'yi hazırlamadan
-önce bu kopyanın mevcut olduğundan emin ol.
+Enter a backup passphrase of at least 16 characters when prompted. Store the
+passphrase and the `.huebak` archive separately in secure offline storage; never
+commit either to GitHub. `huectl backup` refuses to overwrite an existing file.
+Copy the `.huebak` file off the router USB drive via SFTP before performing any USB
+maintenance.
 
-Yedek; canonical ayarlar, adaptör/ampul kimliği, BLE bond, API/Tunnel/kurulum
-kodu bağlantı sırları, release trust public key ve komut günlüğünü içerir.
-Aktif ayrı kullanıcı ajanının en güncel verisi alınır. Günlük/cache ve sürüm
-binary'leri yedeğe eklenmez. SSH özel anahtarları, SSH host key, modem ayarları,
-Cloudflare Worker veritabanı ve Google projesi bu dosyanın kapsamında değildir.
+The backup archive contains canonical configurations, adapter/lamp identities, the
+BLE bond, local API/Tunnel/setup-issuer tokens, the release trust public key, and
+the command journal snapshot taken from the active dedicated-UID agent. Logs,
+caches, and release binaries are excluded. SSH private/host keys, Keenetic OS
+settings, Cloudflare Durable Object state, and Google Cloud project credentials are
+outside the scope of `.huebak`.
 
-## Aynı çalışan kurulumda geri yükleme
+## Restoring on the Same Running Installation
 
-Önce doğrulama; servisler durmaz:
+First run a non-disruptive verification dry-run (services remain running):
 
 ```sh
-huectl restore /guvenli/yol/benim-yedegim.huebak --dry-run
+huectl restore /secure/path/my-backup.huebak --dry-run
 ```
 
-Yedek parolasını gizli terminal istemine gir. Başarılı yanıt `verified: true`
-ve `installationChanged: false` gösterir.
+Enter the backup passphrase at the hidden terminal prompt. A valid archive returns
+`verified: true` and `installationChanged: false`.
 
-Doğrulama başarılıysa:
+Once verified, apply the restore and check live health:
 
 ```sh
-huectl restore /guvenli/yol/benim-yedegim.huebak
+huectl restore /secure/path/my-backup.huebak
 huectl health --live --json
 ```
 
-Servis durdurulur, güncel veri geri dönüş için korunur, yedek uygulanır ve
-yeniden başlayan sürümün sağlığı denetlenir. Normal geri yüklemenin başlatması
-başarısızsa geri yükleme öncesindeki güncel kayıtlarla geri dönülür. İşlem
-kesilirse dosyaları elle taşımak yerine:
+`huectl` stops the services, preserves current state for rollback, applies the
+backup, and verifies live health of the restarted release. If startup fails after a
+normal restore, `huectl` automatically rolls back to the pre-restore state. If a
+restore is interrupted by power loss, do not move files manually—run:
 
 ```sh
 huectl restore --recover
 huectl health --live --json
 ```
 
-Kaybolmuş veya bozulmuş aktif journal, eski master dosyadan kendiliğinden
-oluşturulmaz. Bu hata güvenlik açısından kasıtlı olarak başlangıcı durdurur.
-Bozuk aktif durumdan yerinde zorla geri yükleme bu aşamada tamamlanmış bir
-onarım yolu değildir; sağlam yedeği koruyup aşağıdaki temiz kurulum yolunu kullan.
+A missing or corrupted active runtime journal is never silently regenerated from an
+older master file; startup halts safely. For unrecoverable active storage loss, use
+a verified `.huebak` backup with the clean-install workflow below.
 
-## Yeni USB / temiz Entware
+## Migrating to a New USB Drive / Clean Entware Root
 
-1. Şifreli yedeği ve parolasını, güvenilir imzalı sürüm paketini ve public key
-   özetini USB'den ayrı sakla. Aynı Bluetooth adaptörünü ve ampulü koru.
-2. Yeni USB üzerinde Entware'i kur; paketin Python/platform sürüm kilidiyle
-   uyumunu sağla. İmzalı kurucu bağımlılıkları kendiliğinden yükseltmez.
-   Termius anahtarını ve yeni SSH host fingerprint'ini kendi doğrulamanla kur.
-3. Yeni USB kurulumundan sonra Keenetic'i normal biçimde yeniden başlat.
-   Önceki kurulumun geçici native hesap satırları aynı oturumda kalabilir.
-4. Sürümün yayımlanan güvenilir kurucusunu ve public key doğrulamasını kullan.
-   Kurucu imzayı doğrular; sürümü, yönetim komutunu ve ayrı servis hesaplarını
-   hazırlar. Henüz ampulü sıfırlamak veya yeniden eşleştirmek gerekmez.
-5. Şifreli yedeği özel bir dizine kopyala ve sürümün gerçek kimliğini kullan:
+1. Keep your encrypted `.huebak` archive, its passphrase, the signed `.huerel`
+   release bundle, and the public key SHA-256 fingerprint stored outside the USB
+   drive. Keep the same USB Bluetooth adapter and Hue bulb.
+2. Set up Entware on the new ext4 USB drive matching the Python and native package
+   versions in [`requirements-router.lock.json`](../requirements-router.lock.json).
+   The signed installer does not upgrade OS packages automatically. Verify the new
+   SSH host key fingerprint through a trusted local interface.
+3. Reboot the Keenetic router normally after setting up the new USB drive so any
+   transient native user/group entries from a previous session are cleared.
+4. Run the standalone `install_release.py` bootstrap installer with the public key
+   fingerprint ([installation guide](installation.md)). It verifies the signature
+   and prepares the release slot, `huectl` entry point, and dedicated service
+   principals. Do not reset or re-pair the Hue bulb.
+5. Copy your `.huebak` archive into a private `0700` directory and run the
+   initialization restore using the installed `RELEASE_ID`:
 
 ```sh
-huectl restore /guvenli/yol/benim-yedegim.huebak --initialize --release-id SURUM_KIMLIGI --dry-run
-huectl restore /guvenli/yol/benim-yedegim.huebak --initialize --release-id SURUM_KIMLIGI
+huectl restore /secure/path/my-backup.huebak --initialize --release-id RELEASE_ID --dry-run
+huectl restore /secure/path/my-backup.huebak --initialize --release-id RELEASE_ID
 huectl health --live --json
 ```
 
-`SURUM_KIMLIGI` bir örnek yer tutucudur; paketteki sürümle değiştirilmelidir.
-Temiz kurulum, yedeğin sayısal Linux kullanıcılarını kopyalamaz. Yeni kimlikler
-çakışma denetiminden geçirilir; ajan verilerinin sahibi güvenli hazırlıkla atanır.
-Ana uygulama köküne veya USB ağacına toplu `chown` uygulanmaz.
+Replace `RELEASE_ID` with the installed release version (for example `0.2.0-rc.12`).
+Clean initialization does not copy numeric Linux UIDs from the backup; it checks
+service accounts for conflicts and assigns ownership safely without running
+recursive `chown` across the unified root or USB mount.
 
-`ACCOUNT_UNPROFILED_NAME`, hesapların mevcut olduğunu fakat güvenilir kimlik
-profilinin bulunmadığını söyler. Kurucu mevcut hesabı devralmaz ve satırları
-silmez. Yeni USB/yeni Entware ise normal yeniden başlatmadan sonra aynı imzalı
-kurucuyu yinele. Eski Entware hesabını koruyan veya uygulama profili silinmiş bir
-kurulumda hesap dosyalarını elle temizleme; sağlam kurulum/yedeği koru ve temiz
-USB yolunu kullan. Farklı Bluetooth adaptörü, ayrı ve bilinçli eşleştirme/göç
-işlemidir; eski bond'un başka denetleyicide çalışacağı varsayılmaz.
+`ACCOUNT_UNPROFILED_NAME` indicates that service account names exist in `/opt/etc`
+without a matching trusted identity profile. The installer refuses to adopt or
+delete unprofiled accounts. On a fresh USB/Entware setup, reboot the router and
+re-run the signed installer. Using a different USB Bluetooth controller requires a
+separate deliberate pairing and migration; a BLE bond from one controller is not
+assumed to work on another.
 
-## Kod ve sürüm geri dönüşü
+## Code Rollback and Slot Repair
 
-Önceki doğrulanmış sürüm mevcutsa:
+If a previous verified release slot is recorded:
 
 ```sh
 huectl rollback
 huectl health --live --json
 ```
 
-İmzalı kod slotu veya yeniden üretilebilir runtime dosyalarının izinleri
-bozuksa aynı sürümün doğrulanmış paketini kullan:
+If a signed code slot or reproducible runtime projection has damaged permissions,
+repair it using the verified `.huerel` bundle for the **same** release version:
 
 ```sh
-huectl repair /guvenli/yol/ayni-surum.huerel
+huectl repair /secure/path/same-version.huerel
 ```
 
-Yeni uygulamada onarım servisleri durdurur, güncel ajan verisini korur ve
-yalnız sabit kod/ayar/credential projection alanları ile runtime run/log/cache
-alanlarını root'a özel karantinaya taşır. İmzalı kod ve root master ayarlardan
-bu alanları yeniden oluşturur; eski dosyaları topluca chown etmez. Bond ve
-komut günlüğü bu karantinaya taşınmaz. Başarı, yeniden başlayan sürümün sağlık
-kontrolünü gerektirir. Bu davranış ayrı UID'li sahte servislerde doğrulandı;
-canlı dağıtım kabulü henüz yapılmadı.
-
-Onarım yarıda kalırsa başka sürüme geçmeden önce:
+`huectl repair` stops the services, preserves active agent state (BLE bond and
+command journal), moves reproducible code/config/credential projection and
+run/log/cache directories into a root-private quarantine, and rebuilds them from
+the signed archive and root master configuration. If interrupted, run:
 
 ```sh
 huectl recover
 huectl health --live --json
 ```
 
-Onarımın bozuk mutable journal'ı, kayıp bond'u veya kayıp kimlik profilini
-onaracağı varsayılmaz. Karantina özel sır kopyaları içerebilir; paylaşma veya
-GitHub'a ekleme. Kod onarımı, arşiv geri yükleme ve yeni USB kurulumu farklı
-işlemlerdir; Google Home hesabını gereksiz yere yeniden bağlama.
+Never share or commit quarantine directories, as they may contain private token
+projections. Code repair, backup restore, and clean USB migration are distinct
+operations—do not unlink your Google Home account unless OAuth credentials were
+actually lost.

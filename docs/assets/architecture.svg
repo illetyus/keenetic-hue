@@ -35,8 +35,8 @@
 
   <!-- Header -->
   <g font-family="Segoe UI, Inter, Arial, sans-serif">
-    <text x="40" y="46" fill="#f8fafc" font-size="24" font-weight="700">Keenetic Hue — Mimari, Güven Sınırları ve Süreç İzolasyonu</text>
-    <text x="40" y="72" fill="#94a3b8" font-size="14">Gelen port açmadan (outbound-only Tunnel), ayrılmış servis kimlikleri, imzalı sürüm doğrulaması ve korumalı SQLite kurtarma ile yerel BLE kontrolü</text>
+    <text x="40" y="46" fill="#f8fafc" font-size="24" font-weight="700">Keenetic Hue — Architecture, Trust Boundaries &amp; Privilege Isolation</text>
+    <text x="40" y="72" fill="#94a3b8" font-size="14">Zero inbound ports (outbound-only Tunnel), dedicated service principals, Ed25519-signed releases, and staged SQLite crash recovery</text>
     <rect x="1050" y="24" width="190" height="34" rx="17" fill="#0f292a" stroke="#2dd4bf" stroke-width="1.5"/>
     <text x="1145" y="46" fill="#5eead4" font-size="13" font-weight="700" text-anchor="middle">RC12 · Ed25519 Signed</text>
   </g>
@@ -44,85 +44,85 @@
   <!-- ZONE 1: Cloud Boundary -->
   <g font-family="Segoe UI, Inter, Arial, sans-serif">
     <rect x="36" y="96" width="320" height="440" rx="16" fill="url(#zoneCloud)" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="6 4"/>
-    <text x="56" y="126" fill="#60a5fa" font-size="13" font-weight="700" letter-spacing="1">1. BULUT YETKİ VE RÖLE SINIRI</text>
+    <text x="56" y="126" fill="#60a5fa" font-size="13" font-weight="700" letter-spacing="1">1. CLOUD AUTH &amp; RELAY BOUNDARY</text>
 
     <!-- Google Home Box -->
     <rect x="56" y="144" width="280" height="118" rx="12" fill="#162b44" stroke="#3b82f6" stroke-width="1.5"/>
     <text x="76" y="172" fill="#f8fafc" font-size="17" font-weight="700">Google Home / HomeGraph</text>
     <text x="76" y="196" fill="#cbd5e1" font-size="13">• Smart Home: SYNC / QUERY / EXECUTE</text>
-    <text x="76" y="218" fill="#cbd5e1" font-size="13">• OAuth 2.0 hesap bağlama</text>
-    <text x="76" y="240" fill="#93c5fd" font-size="12" font-family="Consolas, monospace">[test] Keenetic Hue (Kişisel Proje)</text>
+    <text x="76" y="218" fill="#cbd5e1" font-size="13">• OAuth 2.0 account linking</text>
+    <text x="76" y="240" fill="#93c5fd" font-size="12" font-family="Consolas, monospace">[test] Keenetic Hue (Personal Project)</text>
 
     <!-- Cloudflare Worker Box -->
     <rect x="56" y="302" width="280" height="156" rx="12" fill="#162b44" stroke="#38bdf8" stroke-width="1.5"/>
     <text x="76" y="330" fill="#f8fafc" font-size="17" font-weight="700">Cloudflare Worker (cloud/)</text>
-    <text x="76" y="354" fill="#cbd5e1" font-size="13">• Tek kullanımlık 600 sn kurulum kodu</text>
-    <text x="76" y="376" fill="#cbd5e1" font-size="13">• Sınırlı komut kuyruğu ve yetki kontrolü</text>
+    <text x="76" y="354" fill="#cbd5e1" font-size="13">• One-time 600s setup code exchange</text>
+    <text x="76" y="376" fill="#cbd5e1" font-size="13">• Bounded command queue &amp; auth fence</text>
     <text x="76" y="398" fill="#cbd5e1" font-size="13">• HomeGraph RequestSync / ReportState</text>
-    <text x="76" y="422" fill="#7dd3fc" font-size="12" font-family="Consolas, monospace">BLE bond veya yerel anahtar tutmaz</text>
+    <text x="76" y="422" fill="#7dd3fc" font-size="12" font-family="Consolas, monospace">Holds no BLE bond or local API keys</text>
 
     <!-- Cloud Security Note -->
     <rect x="56" y="474" width="280" height="44" rx="8" fill="#0d1b2a" stroke="#1e3a5f"/>
-    <text x="196" y="501" fill="#94a3b8" font-size="12" text-anchor="middle">Kimlik doğrulama: dar kapsamlı cihaz/API token</text>
+    <text x="196" y="501" fill="#94a3b8" font-size="12" text-anchor="middle">Auth: scoped device &amp; setup-issuer tokens</text>
   </g>
 
   <!-- ZONE 2: Keenetic Router / Entware Boundary -->
   <g font-family="Segoe UI, Inter, Arial, sans-serif">
     <rect x="416" y="96" width="536" height="440" rx="16" fill="url(#zoneRouter)" stroke="#14b8a6" stroke-width="2"/>
-    <text x="438" y="126" fill="#2dd4bf" font-size="13" font-weight="700" letter-spacing="1">2. KEENETIC ENTWARE BİRLEŞİK KÖK (/opt/var/lib/keenetic-hue-system)</text>
+    <text x="438" y="126" fill="#2dd4bf" font-size="13" font-weight="700" letter-spacing="1">2. KEENETIC ENTWARE UNIFIED ROOT (/opt/var/lib/keenetic-hue-system)</text>
 
     <!-- Tunnel Process Box -->
     <rect x="438" y="144" width="236" height="132" rx="12" fill="#133337" stroke="#2dd4bf" stroke-width="1.5"/>
     <text x="456" y="170" fill="#f8fafc" font-size="16" font-weight="700">Cloudflared Tunnel</text>
     <text x="456" y="192" fill="#5eead4" font-size="12" font-family="Consolas, monospace">uid/gid: hue-tunnel (61000)</text>
-    <text x="456" y="216" fill="#cbd5e1" font-size="13">• Dışarı doğru (outbound) TLS</text>
-    <text x="456" y="236" fill="#cbd5e1" font-size="13">• Hazırlık ucu: 127.0.0.1:18790</text>
-    <text x="456" y="256" fill="#cbd5e1" font-size="13">• Yalnız yerel API'ye iletim</text>
+    <text x="456" y="216" fill="#cbd5e1" font-size="13">• Outbound-only TLS tunnel</text>
+    <text x="456" y="236" fill="#cbd5e1" font-size="13">• Readiness: 127.0.0.1:18790</text>
+    <text x="456" y="256" fill="#cbd5e1" font-size="13">• Forwards only to local API</text>
 
     <!-- BLE Agent Box -->
     <rect x="694" y="144" width="238" height="172" rx="12" fill="#133337" stroke="#2dd4bf" stroke-width="1.5"/>
-    <text x="712" y="170" fill="#f8fafc" font-size="16" font-weight="700">Hue BLE Ajanı (hue_agent/)</text>
+    <text x="712" y="170" fill="#f8fafc" font-size="16" font-weight="700">Hue BLE Agent (hue_agent/)</text>
     <text x="712" y="192" fill="#5eead4" font-size="12" font-family="Consolas, monospace">uid/gid: hue-agent (61001)</text>
-    <text x="712" y="216" fill="#cbd5e1" font-size="13">• Yerel API: 127.0.0.1:8787</text>
-    <text x="712" y="236" fill="#cbd5e1" font-size="13">• Unix soket: health.sock (SO_PEERCRED)</text>
-    <text x="712" y="256" fill="#cbd5e1" font-size="13">• Fiziksel okuma ile verified onay</text>
-    <text x="712" y="276" fill="#cbd5e1" font-size="13">• OUTCOME_UNKNOWN tekrar edilmez</text>
+    <text x="712" y="216" fill="#cbd5e1" font-size="13">• Local API: 127.0.0.1:8787</text>
+    <text x="712" y="236" fill="#cbd5e1" font-size="13">• Unix socket: health.sock (SO_PEERCRED)</text>
+    <text x="712" y="256" fill="#cbd5e1" font-size="13">• Readback-verified state confirmation</text>
+    <text x="712" y="276" fill="#cbd5e1" font-size="13">• Never replays OUTCOME_UNKNOWN</text>
     <text x="712" y="298" fill="#fde68a" font-size="12" font-family="Consolas, monospace">commands.sqlite (0600)</text>
 
     <!-- Manager & Recovery Box -->
     <rect x="438" y="336" width="494" height="182" rx="12" fill="#0f272b" stroke="#0d9488" stroke-width="1.5"/>
-    <text x="458" y="364" fill="#f8fafc" font-size="16" font-weight="700">Yönetim, İmzalı Sürüm ve Kurtarma Katmanı (hue_admin/ &amp; huectl)</text>
-    <text x="458" y="390" fill="#cbd5e1" font-size="13">• Sürüm Doğrulama: Ed25519 imzalı 90 dosyalık .huerel paketi + atomik active.json ve otomatik rollback</text>
-    <text x="458" y="414" fill="#cbd5e1" font-size="13">• Süreç Sahipliği: Yalnızca PID değil; boot_id, süreç başlangıç zamanı (startTicks), cmdline ve UID/GID denetimi</text>
-    <text x="458" y="438" fill="#cbd5e1" font-size="13">• Korumalı SQLite Kurtarma: Sıcak DB + journal çifti opak olarak (0700) saklanır; kurtarma yalnızca geçici</text>
-    <text x="470" y="458" fill="#cbd5e1" font-size="13">kopyada yetkisiz hue-agent (61001) alt süreci ve kaynak sınırlarıyla çalıştırılır</text>
+    <text x="458" y="364" fill="#f8fafc" font-size="16" font-weight="700">Manager, Signed Releases &amp; Recovery Layer (hue_admin/ &amp; huectl)</text>
+    <text x="458" y="390" fill="#cbd5e1" font-size="13">• Release Verification: Ed25519-signed 90-file .huerel bundle + atomic active.json &amp; automatic rollback</text>
+    <text x="458" y="414" fill="#cbd5e1" font-size="13">• Process Ownership: Verifies boot_id, process startTicks, cmdline &amp; UID/GID (never trusts PID alone)</text>
+    <text x="458" y="438" fill="#cbd5e1" font-size="13">• Staged SQLite Recovery: Preserves hot DB + journal pair as opaque 0700 files; runs bounded recovery</text>
+    <text x="470" y="458" fill="#cbd5e1" font-size="13">on a disposable staged copy under the unprivileged hue-agent (61001) child process</text>
     <text x="458" y="486" fill="#5eead4" font-size="12" font-family="Consolas, monospace">CLI: huectl status | huectl health --live --json | huectl update | huectl rollback | huectl backup</text>
   </g>
 
   <!-- ZONE 3: Physical Radio & Hardware Boundary -->
   <g font-family="Segoe UI, Inter, Arial, sans-serif">
     <rect x="1008" y="96" width="236" height="440" rx="16" fill="url(#zoneBle)" stroke="#f59e0b" stroke-width="1.5"/>
-    <text x="1028" y="126" fill="#fbbf24" font-size="13" font-weight="700" letter-spacing="1">3. FİZİKSEL RADYO SINIRI</text>
+    <text x="1028" y="126" fill="#fbbf24" font-size="13" font-weight="700" letter-spacing="1">3. PHYSICAL RADIO BOUNDARY</text>
 
     <!-- USB Dongle Box -->
     <rect x="1028" y="144" width="196" height="132" rx="12" fill="#2c2416" stroke="#f59e0b" stroke-width="1.5"/>
     <text x="1046" y="172" fill="#f8fafc" font-size="16" font-weight="700">USB Bluetooth HCI</text>
     <text x="1046" y="196" fill="#fde68a" font-size="12" font-family="Consolas, monospace">Belkin BCM20702A0</text>
-    <text x="1046" y="220" fill="#cbd5e1" font-size="13">• Google Bumble HCI</text>
-    <text x="1046" y="240" fill="#cbd5e1" font-size="13">• USB udev/hotplug izinleri</text>
-    <text x="1046" y="260" fill="#cbd5e1" font-size="13">• Özel BLE bond.json (0600)</text>
+    <text x="1046" y="220" fill="#cbd5e1" font-size="13">• Google Bumble HCI stack</text>
+    <text x="1046" y="240" fill="#cbd5e1" font-size="13">• Scoped USB hotplug perms</text>
+    <text x="1046" y="260" fill="#cbd5e1" font-size="13">• Private BLE bond.json (0600)</text>
 
     <!-- Hue Lamp Box -->
     <rect x="1028" y="316" width="196" height="142" rx="12" fill="#2c2416" stroke="#fbbf24" stroke-width="1.5"/>
     <text x="1046" y="344" fill="#f8fafc" font-size="16" font-weight="700">Philips Hue BLE</text>
     <text x="1046" y="368" fill="#fde68a" font-size="12" font-family="Consolas, monospace">Hue White LWA017</text>
-    <text x="1046" y="392" fill="#cbd5e1" font-size="13">• Açma / Kapatma (On/Off)</text>
-    <text x="1046" y="412" fill="#cbd5e1" font-size="13">• Beyaz Işık Parlaklığı</text>
-    <text x="1046" y="436" fill="#94a3b8" font-size="12">GATT okuma ile durum teyidi</text>
+    <text x="1046" y="392" fill="#cbd5e1" font-size="13">• Power (On / Off)</text>
+    <text x="1046" y="412" fill="#cbd5e1" font-size="13">• White-light Brightness</text>
+    <text x="1046" y="436" fill="#94a3b8" font-size="12">GATT readback state verification</text>
 
     <!-- Hardware Scope Note -->
     <rect x="1028" y="474" width="196" height="44" rx="8" fill="#1c1810" stroke="#78350f"/>
-    <text x="1126" y="501" fill="#fcd34d" font-size="12" text-anchor="middle">Hue Bridge gerekmez</text>
+    <text x="1126" y="501" fill="#fcd34d" font-size="12" text-anchor="middle">No Hue Bridge required</text>
   </g>
 
   <!-- Connections / Arrows -->
@@ -162,7 +162,7 @@
   <g font-family="Segoe UI, Inter, Arial, sans-serif">
     <rect x="36" y="554" width="1208" height="44" rx="10" fill="#09111a" stroke="#1e293b"/>
     <text x="56" y="581" fill="#cbd5e1" font-size="13">
-      <tspan fill="#2dd4bf" font-weight="700">Güvenlik Özeti:</tspan> Router'da gelen port açılmaz · Özel anahtarlar, BLE bond ve `.huebak` yedekleri depoda yer almaz · Kaynak testleri: 81 Python + 64 Worker testi
+      <tspan fill="#2dd4bf" font-weight="700">Security Summary:</tspan> Zero inbound port forwarding · Private keys, BLE bonds &amp; .huebak backups stay outside the repository · 81 Python + 64 Worker tests
     </text>
   </g>
 </svg>

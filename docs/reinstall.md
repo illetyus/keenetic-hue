@@ -1,29 +1,50 @@
-# USB/Entware kaybından sonra yeniden kurulum
+# Reinstallation After USB or Entware Loss
 
-Bu kılavuz yeni Entware USB’sine imzalı RC12 yazılımını kurup aynı cihazın şifreli yedeğini geri yükleme yolunu anlatır. USB biçimlendirmeden önce doğru fiziksel diski doğrula.
+This guide covers installing the signed RC12 release onto a new Entware USB drive
+and restoring an encrypted `.huebak` backup from the same hardware setup. Always
+verify the target physical disk before formatting a USB drive.
 
-Bu yol, aynı Bluetooth adaptörü ve aynı ampulün şifreli özel yedeği içindir. Ampul sıfırlanmaz; mevcut Google/Cloudflare kaynakları korunur. Farklı adaptör veya ampul için eski bond'un çalışacağı varsayılmaz. Ajan gerçek adaptörün public adresini yapılandırmadaki kimlikle karşılaştırır; uyuşmazlıkta kontrol başlamaz.
+This workflow applies when keeping the **same USB Bluetooth adapter and the same
+Hue bulb** with a valid personal `.huebak` backup. The bulb is not reset, and
+existing Google Home and Cloudflare resources remain intact. The BLE agent checks
+the physical adapter's public MAC address against the configured controller
+identity and refuses to start if they do not match.
 
-## 1. USB dışında hazır tutulacaklar
+## 1. Prerequisites Kept Outside the Router USB Drive
 
-- Kişisel parolayla oluşturulmuş `.huebak` ve parolası; birbirinden ayrı güvenli yerlerde.
-- İmzalı `.huerel`, açık doğrulama anahtarı, doğrulanmış açık anahtar parmak izi ve bağımsız `install_release.py`.
-- Bu kılavuz, `requirements-router.lock.json` ve `requirements-pure-router.txt`.
-- Cloudflare/Google hesap erişimi. Bu cihaz yedeği buluttaki geri okunamayan secret'ların tam yedeği değildir.
+- Your password-protected `.huebak` backup and its passphrase, stored in separate
+  secure locations.
+- The signed `.huerel` bundle, `keys/release-trust.pub`, the verified public key
+  SHA-256 fingerprint, and the standalone `deploy/install_release.py` installer.
+- This guide, [`requirements-router.lock.json`](../requirements-router.lock.json),
+  and [`requirements-pure-router.txt`](../requirements-pure-router.txt).
+- Access to your Cloudflare and Google Cloud accounts (a router `.huebak` archive
+  does not back up write-only cloud Worker secrets).
 
-Bir yazılım paketi tek başına BLE bond, token veya Google bağlantısını yeniden oluşturmaz. Özel yedek kayıpsa yeniden yetkilendirme/eşleştirme ayrı işlemdir.
+A software bundle alone does not recreate a BLE bond, local tokens, or Google Home
+links. If your personal `.huebak` archive is lost, BLE pairing and cloud
+provisioning must be performed from scratch.
 
-## 2. Entware'i hazırlama
+## 2. Preparing Entware
 
-USB'yi ext4 hazırlama ve Entware kurma işlemini kendi Keenetic modelinin [resmî OPKG](https://help.keenetic.com/hc/tr/articles/360000948719-OPKG) ve [USB'ye Entware kurulum](https://destek.keenetic.com.tr/titan/kn-1811/tr/20980-installing-the-entware-repository-on-a-usb-drive.html) adımlarına göre yap. Bu işlem USB'deki eski verileri silebileceğinden doğru fiziksel diski ayrıca doğrula. Windows DiskPart'ın ext4 biçimlendirme yaptığı varsayılmaz.
+Format the USB drive as `ext4` and install Entware according to Keenetic's official
+[OPKG support](https://help.keenetic.com/hc/en-us/articles/360000948719) and
+Entware installation guides for your router model. Formatting erases existing data
+on the target drive—verify the physical disk carefully.
 
-Keenetic'te Açık Paket Desteği ve EXT dosya sistemi bileşenleri gerekir; OPKG sayfasında ilgili USB sürücü seçilir. Kurucu arşivi cihazın gerçek CPU mimarisine göre seçilir. Bağlantılı kılavuzdaki model örneği bu projenin paket profili değildir. Bu ilk Hue paketi `mips-3.4`/CPython 3.13 içindir. Entware kurulumu tamamlanınca SSH portunu sistemin gerçek ayarına göre kullan; bu kurulumda port 222 kullanıldı. Resmî belge portun Keenetic SSH bileşenine göre 22 veya 222 olabildiğini açıklar.
+Enable Keenetic's Open Package Support (OPKG) and EXT filesystem components, select
+the USB drive on the OPKG page, and use the Entware installer matching your CPU
+architecture. The verified RC12 package profile targets `mips-3.4` with CPython
+3.13. Connect to Entware SSH on its configured port (commonly `222` or `22`
+depending on your Keenetic SSH settings).
 
-SSH anahtar değişimi gerçek yeniden kurulumdan kaynaklanıyorsa yeni parmak izini cihazın güvenilir yerel arayüzünden doğrula. Eski kaydı sorgusuz kaldırma. Entware parolasını kendin belirle.
+When a host key change is caused by a genuine USB/Entware reinstallation, verify
+the new SSH host key fingerprint through a trusted local session before updating
+your SSH client's `known_hosts`.
 
-## 3. Çalışma zamanı bağımlılıkları
+## 3. Installing Pinned Runtime Dependencies
 
-Yeni Entware SSH oturumunda:
+In the new Entware SSH session:
 
 ```sh
 opkg update
@@ -33,7 +54,10 @@ python3 --version
 python3 -c 'import cryptography; print(cryptography.__version__)'
 ```
 
-`cryptography`, bu MIPS hedefinde Entware'in derlenmiş paketiyle kurulur. Python/Rust derlemesi router üzerinde başlatılmaz. Saf Python gereksinim listesini özel kurulum klasörüne SFTP ile kopyaladıktan sonra:
+`cryptography` is installed from Entware's prebuilt binary package (no Rust/C
+compilation on the router). Copy `requirements-pure-router.txt` via SFTP into
+`/opt/var/tmp/hue-install/` and install the pinned pure-Python dependencies and
+Bumble:
 
 ```sh
 python3 -m pip install --no-cache-dir --only-binary=:all: \
@@ -41,11 +65,17 @@ python3 -m pip install --no-cache-dir --only-binary=:all: \
 python3 -m pip install --no-cache-dir --no-deps bumble==0.0.236
 ```
 
-Liste, gerçek cihazda doğrulanmış BLE ajanı bağımlılıklarını sabitler. Bumble'ın kullanılmayan web uygulamaları için ek bağımlılıklar bu profilin parçası değildir. Sabitlenmiş native sürümler `requirements-router.lock.json` içindedir. Entware deposu daha yeni sürüme geçtiyse imzalı paket bunu reddedebilir; kontrolü devre dışı bırakmak yerine yeni profil için test edilmiş bir paket hazırlanır. Bu işlem Keenetic firmware'ini veya diğer sistem paketlerini topluca güncellemez.
+Exact native and Python package versions are locked in
+[`requirements-router.lock.json`](../requirements-router.lock.json). If upstream
+Entware packages advance to a newer incompatible version, the signed installer
+rejects the mismatch rather than running untested combinations; build and test a
+new signed release instead of disabling dependency checks.
 
-## 4. Yazılımı kurma
+## 4. Installing the Signed Software
 
-[İmzalı yazılım hazırlama](installation.md#imzalı-yazılımı-hazırlama) komutunu çalıştır. Yedek dosyasını SFTP ile root'a özel bir klasöre kopyala ve dosyaya yalnız root erişimi ver:
+Run the [signed software bootstrap command](installation.md#preparing-the-signed-software).
+Then copy your `.huebak` backup archive via SFTP into a `root`-only directory with
+`0600` permissions:
 
 ```sh
 mkdir -p /opt/var/lib/keenetic-hue-system/backups
@@ -53,16 +83,18 @@ chmod 700 /opt/var/lib/keenetic-hue-system/backups
 chmod 600 /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak
 ```
 
-## 5. Boş kurulumda önce doğrulama, sonra geri yükleme
+## 5. Dry-Run Verification and Initialization Restore
 
-Bu komutlar birleşik düzenin **10 dosyalı yedeğini** kabul eder. Eski 9 dosyalı düzenin yedeği bu işlemle otomatik dönüştürülmez. `VERSION`, kurduğun doğrulanmış yazılım yuvasıdır:
+These commands accept the **10-file unified backup format** (`VERSION` is the
+installed release ID, e.g. `0.2.0-rc.12`):
 
 ```sh
 huectl restore /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak \
   --initialize --release-id VERSION --dry-run
 ```
 
-Parolayı terminalde gizli girişe yaz. Doğrulama başarılıysa:
+Enter your backup passphrase at the hidden terminal prompt. Once `verified: true`
+is returned, run the initialization restore and live health check:
 
 ```sh
 huectl restore /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak \
@@ -70,18 +102,30 @@ huectl restore /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak \
 huectl health --live --json
 ```
 
-İlk doğrulama dosya yazmaz veya servis başlatmaz. Uygulama aşamasında hedefte mevcut yapılandırma/kimlik varsa işlem reddedilir; çalışan kurulumu boş kurulum gibi ezmez. İmza ve durum şeması, şifreli kimlik, kesin dosya listesi, sabit dosya yolları, token biçimleri ve gerçek uygulamanın SQLite şeması doğrulanır. Yedekteki açık doğrulama anahtarı kurulumda sabitlenen anahtarla aynı olmalıdır.
+The dry-run writes no persistent files and starts no services. During application,
+`--initialize` refuses to overwrite an existing configured installation. It
+validates the Ed25519 signature, state schema, encrypted identity, exact file
+manifest, token formats, and SQLite command journal schema inside an unprivileged
+worker. The release trust public key inside the backup must match the installed
+trust key.
 
-Yeni sahipler başladıktan sonra 90 saniyeye kadar BLE/Tunnel ve doğru sürüm sağlığı beklenir. Bu adım fiziksel adaptör kimliği kontrolünü ve mevcut bond ile şifreli bağlantıyı da sınar. Lamba için test aç/kapat komutu üretilmez. Doğrulanan ampulün fiziksel elektriği bu kabul sırasında açık olmalıdır.
+Once the dedicated service principals start, `huectl` waits up to 90 seconds for
+live BLE, Tunnel, and release-ownership health. This verifies physical USB adapter
+identity and encrypted BLE readback without toggling the lamp on or off (the bulb
+must have mains power during acceptance).
 
-Yarım veya başarısız ilk geri yükleme, yeni sahipleri durdurur; kısmi yapılandırmayı `backups/initialize-*` altında korur ve boş kurulum durumuna döner. Elektrik kesintisinden sonra başlangıç girişi veya `huectl recover` aynı makbuzu işler. Parolayı veya yedeği destek mesajına koyma.
+If an initialization restore is interrupted or fails health verification, `huectl`
+stops the new processes, preserves partial state under `backups/initialize-*`, and
+returns to the uninitialized state. After a power cut, `S97` startup or
+`huectl recover` processes the receipt safely.
 
-## 6. Google Home kabulü
+## 6. Google Home Acceptance
 
-Önce `health --live --json` sonucunda doğru sürüm ve `healthy: true` gör. Sonra Google Home'dan istediğin tek bir komutu dene. Aynı bulut kaynakları, geçerli token'lar ve OAuth bağlantısı korunmuşsa yalnız USB değişmesi yeniden hesap bağlamayı gerektirmez. Hesap bağlantısı kaldırılmışsa `huectl setup-code` ile yeni kod üret ve [Google Home kılavuzunu](google-home.md) izle.
+After `huectl health --live --json` reports `healthy: true` for the expected
+`releaseId`, test a single command from Google Home. If your cloud Worker, Tunnel,
+tokens, and OAuth grant were preserved, replacing the router USB drive does not
+require re-linking Google Home. If the account was unlinked, issue a fresh code
+with `huectl setup-code` and follow the [Google Home linking guide](google-home.md).
 
-İnternet, DNS veya iptal edilmiş token nedeniyle bulut erişimi yoksa yerel geri yükleme dosyaları bunu tek başına düzeltemez. Worker/Tunnel/Google kaybı [ayrı bulut kurtarma kapsamıdır](cloud-rebuild.md).
-
-## Kabulün sınırı
-
-İşlevsel prova cihaz üzerinde ayrı geçici dizinler ve sahte ajan/Tunnel uçlarıyla yapılır; aynı makinedeki gerçek üretim portları ve Bluetooth adaptörü kullanılmaz. Gerçek USB'yi silerek yapılan bir prova iddia edilmez. RC11 için mevcut cihazda yeniden başlatma ve kişisel yedeğin geçici bellekte doğrulanması ayrı ayrı kabul edildi. Yeni fiziksel USB üzerinde gerçek geri yükleme bu kontrollerden ayrıdır.
+If cloud connectivity fails due to WAN, DNS, or revoked cloud tokens, local backup
+files alone cannot fix the cloud side; see the [cloud rebuild guide](cloud-rebuild.md).

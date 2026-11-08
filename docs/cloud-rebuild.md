@@ -1,24 +1,29 @@
-# Cloudflare/Google kaynaklarını yeniden hazırlama
+# Rebuilding Cloudflare and Google Home Resources
 
-Bu kılavuz yeni veya kaybolmuş bulut kaynaklarının hazırlanması içindir. Worker sürüm 31 mevcut kurulumda kabul edildi. Ayrı bir Google ve Cloudflare hesabında baştan sona kurulum henüz doğrulanmadı.
+This operator guide covers provisioning or recovering cloud resources after a full
+cloud environment loss. Cloudflare Worker revision 31 passed live acceptance on the
+documented personal installation. End-to-end setup on a brand-new Cloudflare and
+Google Cloud account requires independent validation.
 
-Bu belge tam bulut kaybı için operatör kılavuzudur. Mevcut çalışan kaynakları bu adımları prova etmek için silme. Yalnız USB/Entware değiştiyse [cihaz yedeğinden yeniden kurulum](reinstall.md) yeterli olabilir. Cihaz yedeği Cloudflare Durable Object veritabanını, Google projesini veya geri okunamayan Worker secret'larını içermez.
+Do not delete working production resources merely to rehearse this guide. If only
+the router's USB drive or Entware installation was replaced,
+[reinstalling from your router `.huebak` backup](reinstall.md) is sufficient. A
+router `.huebak` archive does not contain Cloudflare Durable Object storage, your
+Google Cloud project, or write-only Worker secrets.
 
-Bu akış belge ve mevcut uygulama kaynaklarıyla eşleştirildi; yeni bir Cloudflare hesabı ve yeni Google projesinde baştan sona canlı kabul yapılmış sayılmaz. Mevcut RC12 kurulumu hedefli inceleme ve canlı kabulden geçti; yeni hesaplarla ilk kurulum bunun kapsamına girmez.
+## 1. Identify the Recovery Scenario
 
-## 1. Kurtarma senaryosunu belirle
+| What Was Lost | Required Action |
+| --- | --- |
+| **Router USB / Entware only** | Install signed software + restore `.huebak` on the same adapter; verify local health first |
+| **Tunnel only** | Create a new Cloudflare Tunnel & VPC Service, place the new `tunnel.token` on the router, update Worker binding |
+| **Worker code only (Durable Objects intact)** | Re-deploy with the same Worker name, bindings, migrations, and secrets; do not delete the DO namespace |
+| **Durable Object state or entire Cloudflare account** | Deploy fresh DOs and secrets; previous OAuth grants are gone, so re-link Google Home |
+| **Google Cloud project / service account** | Create a new Smart Home project/service account, update Worker variables/secrets, and re-link Google Home |
 
-| Kayıp | Gerekli işlem |
-|---|---|
-| Yalnız USB/Entware | Aynı adaptörle imzalı yazılım + özel yedek; önce yerel sağlık |
-| Yalnız Tunnel | Yeni Tunnel ve VPC Service, cihazda yeni Tunnel token'ı, Worker binding güncellemesi |
-| Worker kodu, DO'lar duruyor | Aynı Worker adı/binding/migration ve secret'larla yeniden deploy; DO namespace silinmez |
-| DO verisi veya tüm Cloudflare hesabı | Yeni DO'lar/secret'lar; eski OAuth grant geri gelmez, Google hesabı yeniden bağlanır |
-| Google proje/hizmet hesabı | Yeni API/entegrasyon/hizmet hesabı, Worker değişkenleri/secret'ları ve yeniden hesap bağlama |
+## 2. Workstation Tooling and Configuration
 
-## 2. PC araçları ve yapılandırma
-
-Desteklenen Node.js ile proje kökünde:
+From the repository root using a supported Node.js runtime:
 
 ```sh
 cd cloud
@@ -27,90 +32,112 @@ node node_modules/wrangler/bin/wrangler.js login
 node node_modules/wrangler/bin/wrangler.js whoami
 ```
 
-Doğru Cloudflare hesabını seç. `wrangler.tunnel.example.jsonc` dosyasını `wrangler.personal.jsonc` adına kopyala. Bu yerel dosyada VPC Service ID, Google proje ID'si, OAuth client ID ve tam Worker origin'ini kendi kaynaklarınla doldur. Secret değerlerini JSONC'ye yazma. Bağımlılık kilidini kullan; sırf yeniden kurulum için rastgele en yeni Wrangler sürümüne geçme.
+Select your target Cloudflare account. Copy `wrangler.tunnel.example.jsonc` to
+`wrangler.personal.jsonc` (which is git-ignored) and fill in your VPC Service ID,
+Google project ID, OAuth client ID, and full Worker HTTPS origin. Never write secret
+values into JSONC files. Use the locked Wrangler version in `package-lock.json`.
 
-## 3. Tunnel ve VPC Service
+## 3. Cloudflare Tunnel and Workers VPC Service
 
-Cloudflare dashboard'da **Workers VPC → Tunnels → Create** ile Tunnel oluştur. Cihazdaki bu projeye ait doğrulanmış MIPS `cloudflared` ikilisini kullan; dashboard'daki başka mimariye ait indirme komutunu cihazda çalıştırma. Tunnel token'ını parola yöneticisinde sakla ve Keenetic'te yalnız root'un erişebildiği `secrets/tunnel.token` dosyasına güvenli biçimde aktar. SFTP ile hazırlanmış 0600 dosyayı sabit hedefe taşı; token'ı komut argümanı veya sohbet mesajı yapma. Sonra `huectl restart tunnel` çalıştır.
+In the Cloudflare dashboard, navigate to **Workers VPC → Tunnels → Create** to
+create a Tunnel. On the Keenetic router, always use the verified MIPS `cloudflared`
+binary shipped inside the signed RC12 bundle—never run generic architecture
+install commands from the dashboard on the router. Store the Tunnel token in your
+password manager and copy it via SFTP as a `0600` root-owned file to
+`/opt/var/lib/keenetic-hue-system/secrets/tunnel.token`, then run
+`huectl restart tunnel`.
 
-**VPC Services → Create** bölümünde bu Tunnel'ı seç. Uygulamamızın kaynaktaki HTTP hedefi `127.0.0.1`, portu `8788`'dir. VPC Service'i aynı HTTP hedefiyle oluştur ve verilen Service ID'yi `HUE_TUNNEL` binding'ine yaz. Bu, router'da gelen port veya özel alan adı gerektirmez. Workers VPC için ilgili hesapta Connectivity Directory yetkisi gerekir. Resmî adımlar: [Workers VPC başlangıç](https://developers.cloudflare.com/workers-vpc/get-started/), [özel HTTP API örneği](https://developers.cloudflare.com/workers-vpc/examples/private-api/).
+Under **VPC Services → Create**, select the Tunnel and configure the HTTP target as
+`127.0.0.1` on port `8788`. Copy the resulting Service ID into the `HUE_TUNNEL`
+binding in `wrangler.personal.jsonc`. This requires zero inbound port forwarding on
+the router. Official documentation:
+[Workers VPC Get Started](https://developers.cloudflare.com/workers-vpc/get-started/) ·
+[Private HTTP API Example](https://developers.cloudflare.com/workers-vpc/examples/private-api/).
 
-## 4. Kimlik bilgilerini yerleştirme
+## 4. Provisioning Worker Secrets
 
-Cloudflare Worker'ın **Settings → Variables and Secrets** bölümünde aşağıdakileri secret olarak sakla. Değerleri terminal çıktısına veya depoya koyma:
+Under **Settings → Variables and Secrets** for the Worker (or via `wrangler secret put`),
+configure the following secrets (never log or commit their values):
 
-| Secret | Kaynak ve sınır |
-|---|---|
-| `DEVICE_TOKEN` | Cihazın `secrets/device.token` dosyasıyla aynı değer; Tunnel içindeki yerel komut yetkisi |
-| `OPERATOR_TOKEN` | Bağımsız rastgele yönetim anahtarı; Keenetic'e kopyalanmaz |
-| `SETUP_ISSUER_TOKEN` | Cihazın `secrets/setup-issuer.token` dosyasıyla aynı; yalnız kurulum kodu üretme |
-| `OAUTH_CLIENT_SECRET` | Google Home entegrasyonundaki OAuth client secret ile aynı |
-| `HOMEGRAPH_SERVICE_ACCOUNT` | Google hizmet hesabının JSON anahtarının tamamı; cihazda saklanmaz |
+| Secret Name | Source and Scope Boundary |
+| --- | --- |
+| `DEVICE_TOKEN` | Exact match with the router's `secrets/device.token`; authorizes commands over the Tunnel |
+| `OPERATOR_TOKEN` | Independent random admin token (minimum 32 chars); never copied to the Keenetic router |
+| `SETUP_ISSUER_TOKEN` | Exact match with the router's `secrets/setup-issuer.token`; authorizes `/admin/setup-code` only |
+| `OAUTH_CLIENT_SECRET` | Matches the OAuth client secret configured in the Google Home Developer Console |
+| `HOMEGRAPH_SERVICE_ACCOUNT` | Full JSON key for the Google HomeGraph service account; never stored on the router |
 
-Yalnız USB yedeğindeki geçerli cihaz/issuer anahtarlarını kullanacaksan bunları yeniden üretmek yerine aynı değerleri koru. Token daha önce iptal edilmişse eski dosyayı geri kopyalamak yetkiyi geri getirmez. Yeni anahtar seçtiğinde iki uç birlikte güncellenmelidir. Yerel `secrets/api.token`, Worker'a yüklenmez.
+Note: the router's local `secrets/api.token` is for local loopback/Unix-socket calls
+only and is never uploaded to the Cloudflare Worker.
 
-Issuer anahtarı için gizli terminal girişi kullanan mevcut araç da vardır:
+To generate and provision `SETUP_ISSUER_TOKEN` interactively from the repository
+root:
 
 ```sh
-cd ..
 node tools/cloud-bootstrap.mjs generate-issuer
 node tools/cloud-bootstrap.mjs provision-issuer
 ```
 
-Bu araç yalnız `keenetic-hue-relay` adlı mevcut Worker'ın `SETUP_ISSUER_TOKEN` secret'ını yönetir. Genel Worker/Tunnel/Google kurucusu değildir. Cihaz eşlemesini `huectl configure-issuer --origin https://WORKER.HESAP.workers.dev` ile tamamla; anahtarı gizli girişte ver. Doğrulama başarısızsa önceki yerel anahtar korunur.
+Then pair the router with `huectl configure-issuer --origin https://WORKER.ACCOUNT.workers.dev`
+([details in the Google Home guide](google-home.md)).
 
-## 5. Worker ve kalıcı veritabanları
+## 5. Deploying the Worker and Durable Objects
 
-Örnek yapılandırmada uygulamaya ait `HUE_RELAY`/`Relay` ve `HUE_AUTH`/`AuthStore` Durable Object binding'lerini ve migration tag'lerini koru. Yeni namespace ilk oluşturulduğunda Google OAuth bağlantıları boş olacaktır. Mevcut namespace'i silmek kod geri alma yöntemi değildir.
-
-`PUBLIC_ORIGIN` tam HTTPS Worker origin'i, `GOOGLE_PROJECT_ID` gerçek Google proje ID'si ve `OAUTH_CLIENT_ID` entegrasyonda belirlediğin client ID olmalıdır. Kuyruk ve raporlama bayraklarını örnekteki profil ile eşleştir. Kodun yüklenmesi bütün secret'ların doğru olduğunu tek başına ispatlamaz.
-
-PC'de `cloud` klasöründe:
+Preserve the `HUE_RELAY` (`Relay`) and `HUE_AUTH` (`AuthStore`) Durable Object
+bindings and migration tags in `wrangler.personal.jsonc`. Verify that
+`PUBLIC_ORIGIN`, `GOOGLE_PROJECT_ID`, and `OAUTH_CLIENT_ID` match your environment,
+then run:
 
 ```sh
 node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.personal.jsonc
 node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.personal.jsonc
 ```
 
-Deploy komutunu yalnız kendi kurtarma işlemin sırasında çalıştır. Mevcut kurulumda yeni bir bulut deploy'u bu belgeyi doğrulamak için yapılmadı. `https://WORKER.HESAP.workers.dev/health` yanıtı yalnız Worker erişimini gösterir; gerçek ampul sağlığını göstermez. NextDNS gibi bir filtre kullanılıyorsa seçtiğin tam Worker origin'inin erişilebilir olduğunu kontrol et.
+## 6. Google Home Developer Console Project
 
-## 6. Google Home projesi
+In the [Google Home Developer Console](https://console.home.google.com/), create or
+select your personal project and configure a Cloud-to-cloud integration supporting
+`LIGHT` (`OnOff` and `Brightness`). Set the OAuth 2.0 endpoints to your Worker
+origin:
 
-[Google Home Developer Console](https://console.home.google.com/) içinde kendi hesabınla projeyi oluştur/seç ve Cloud-to-cloud entegrasyonunu hazırla. Şartların kabulünü kullanıcı kendisi yapar. Entegrasyonda `LIGHT`, aç/kapat ve parlaklık desteğini kullan. OAuth authorization-code akışındaki alanlar bu uygulamada şöyledir:
+| Field | Value |
+| --- | --- |
+| OAuth Client ID | Same as Worker `OAUTH_CLIENT_ID` |
+| OAuth Client Secret | Same as Worker `OAUTH_CLIENT_SECRET` |
+| Authorization URL | `https://WORKER.ACCOUNT.workers.dev/oauth/authorize` |
+| Token URL | `https://WORKER.ACCOUNT.workers.dev/oauth/token` |
+| Fulfillment URL | `https://WORKER.ACCOUNT.workers.dev/fulfillment` |
 
-| Alan | Değer |
-|---|---|
-| OAuth client ID | Worker `OAUTH_CLIENT_ID` ile aynı |
-| OAuth client secret | Worker `OAUTH_CLIENT_SECRET` ile aynı |
-| Authorization URL | `https://WORKER.HESAP.workers.dev/oauth/authorize` |
-| Token URL | `https://WORKER.HESAP.workers.dev/oauth/token` |
-| Fulfillment URL | `https://WORKER.HESAP.workers.dev/fulfillment` |
+Ensure the Google project ID matches `GOOGLE_PROJECT_ID` in the Worker so OAuth
+redirect URI validation succeeds. Enable Test mode for your Google account.
 
-Google projesinin gerçek ID'si Worker'daki ID ile eşleşmelidir; OAuth dönüş adresi bu proje kimliğine bağlı doğrulanır. Rastgele redirect URI ekleme. Kişisel geliştirme için entegrasyonun test durumunu ve telefondaki Google hesabının test erişimini etkinleştir. Genel sertifikasyon/yayın bu kişisel kurulumun yerine geçmiş sayılmaz.
+## 7. HomeGraph State Reporting and Key Rotation
 
-## 7. HomeGraph durum raporlama
+Enable the **HomeGraph API** in Google Cloud Console, create a service account with
+the **Service Account OpenID Connect Identity Token Creator** role, generate a JSON
+key, and upload it to the `HOMEGRAPH_SERVICE_ACCOUNT` Worker secret. Ensure
+`REPORT_STATE_ENABLED` is enabled. Official guides:
+[Report State](https://developers.home.google.com/cloud-to-cloud/integration/report-state#get_started) ·
+[Request Sync](https://developers.home.google.com/cloud-to-cloud/integration/request-sync).
 
-Aynı Google Cloud projesinde HomeGraph API'yi etkinleştir. Resmî yönergeye göre bir hizmet hesabı ve JSON anahtarı oluştur; güncel yönergede rol **Service Accounts → Service Account OpenID Connect Identity Token Creator** olarak belirtilir. JSON'u `HOMEGRAPH_SERVICE_ACCOUNT` secret'ına yükle. Anahtarı depoya veya cihaz yedeğine koyma. [Google'ın API ve anahtar adımları](https://developers.home.google.com/cloud-to-cloud/integration/report-state#get_started) ve [Request Sync](https://developers.home.google.com/cloud-to-cloud/integration/request-sync) belgelerini kullan.
+### Rotating the Service Account Key
 
-`REPORT_STATE_ENABLED` etkin olmalıdır. Uygulama JSON anahtarla HomeGraph scope'u için token üretir; cihaz Google şifresini almaz. Yalnız yerel BLE/Tunnel sağlığı HomeGraph'ın son raporu kabul ettiğini kanıtlamaz; bir Google Home komutu ve rapor kabulü ayrıca kontrol edilir.
+Google recommends rotating user-managed service account keys at least every 90 days
+([key rotation guide](https://docs.cloud.google.com/iam/docs/key-rotation)):
 
-### Hizmet hesabı anahtarının ömrü ve yenilenmesi
-
-Anahtarın durumunu ve tarihini **IAM & Admin → Service Accounts → ilgili hesap → Keys** ekranından kontrol et. Google, hizmet hesabı anahtarlarının en az 90 günde bir döndürülmesini önerir ve kaçırılmış bir döndürmenin kesintiye yol açmaması için anahtarı otomatik sona erme tarihine bağlamayı üretim anahtarları için önermez. [Google anahtar döndürme yönergesi](https://docs.cloud.google.com/iam/docs/key-rotation) · [Hizmet hesabı anahtarları ve sona erme](https://docs.cloud.google.com/iam/docs/service-account-creds#key-expiry).
-
-Yenileme sırası:
-
-1. Aynı hizmet hesabı için yeni JSON anahtarı oluştur. İndirdiğin JSON'u yalnızca parola yöneticisi veya şifreli, erişimi kısıtlı yerel kasada sakla; depoya, Keenetic'e, USB cihaz yedeğine veya destek mesajına koyma.
-2. Cloudflare'da `keenetic-hue-relay` Worker'ının `HOMEGRAPH_SERVICE_ACCOUNT` secret'ını yeni JSON ile değiştir ve yeni Worker sürümünü deploy et. Wrangler kullanılıyorsa depo kökünden önce `cd cloud`, sonra sabitlenmiş yerel araçla `node node_modules/wrangler/bin/wrangler.js secret put HOMEGRAPH_SERVICE_ACCOUNT --config wrangler.personal.jsonc` çalıştır. Komut secret değerini etkileşimli olarak alır ve deploy eder; komut geçmişine JSON içeriği yazma. Kendi hesabına ait, Git dışında tutulan aynı kişisel yapılandırmayı kullan. [Cloudflare Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
-3. Secret güncellemesi Worker sürümünü dağıtır, ancak HomeGraph nesnesi bir Durable Object içinde tutulur. Bu nesne, OAuth erişim belirtecini bellekte önbelleğe alır. Proje yapılandırmasında Durable Object kod güncelleme stratejisi açıkça ayarlanmamış; Cloudflare'ın 2026-10-30 tarihli güncel varsayılanı `deferred` ve etkin nesne yeni sürüme geçmeden önce en fazla 300 saniye eski kodla çalışabilir. Deploy tamamlandıktan sonra en az 6 dakika bekle; böylece yeni sürümün `AuthStore` nesnesini yeniden başlatması ve yeni secret'ı okuması için varsayılan bekleme aralığı aşılır. [Cloudflare Durable Object yaşam döngüsü](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/) · [2026-10-30 varsayılan değişikliği](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/).
-4. Beklemeden sonra `/admin/homegraph-check` çağır. `AuthStore` yeni sürümde yeniden başladıktan sonra ilk HomeGraph kimlik doğrulaması önbellekte eski bir belirteç olmadan gerçekleşir; `authenticated: true` yeni secret'taki anahtarın taze bir Google belirteci üretebildiğini doğrular. Ardından `/admin/report-check` ile rapor kabulünü ve Google'dan okunan durum eşleşmesini denetle. İki uç da `OPERATOR_TOKEN` ister. Bu yönetim anahtarı Keenetic'e yüklenmez ve Cloudflare daha sonra gizli değerini göstermez; oluştururken parola yöneticisine kaydet. Anahtara artık erişimin yoksa parola yöneticisinde en az 32 karakterlik rastgele yeni bir `OPERATOR_TOKEN` üret, Worker secret'ını güncelle, Save/Deploy adımını tamamla ve güvenli kopyasını sakla. Değeri komut satırı geçmişine veya sohbete koyma. Lamba kontrolünü ve otomatik raporu Google Home'da doğrula.
-5. Yeni anahtarın taze belirteç ürettiği ve raporun eşleştiği doğrulanana kadar eski Google anahtarını etkin bırak. Eski anahtarı **Google Cloud Console'dan devre dışı bırakamazsın**; Cloud Shell'de `gcloud iam service-accounts keys list --iam-account=YOUR_HOMEGRAPH_SERVICE_ACCOUNT --managed-by=user` ile eski ve yeni kullanıcı anahtarlarının kimliklerini kontrol et. Sonra eski anahtarı `gcloud iam service-accounts keys disable ESKI_KEY_ID --iam-account=YOUR_HOMEGRAPH_SERVICE_ACCOUNT --project=YOUR_GOOGLE_PROJECT_ID` ile devre dışı bırak. Google, devre dışı bırakmanın önceden verilmiş kısa ömürlü erişim belirteçlerini iptal etmediğini belirtir; bu nedenle son kontrolü belirteç süresi dolduktan sonra (en fazla 60 dakika) tekrarla. Sorun çıkarsa eski anahtarı `gcloud iam service-accounts keys enable ESKI_KEY_ID --iam-account=YOUR_HOMEGRAPH_SERVICE_ACCOUNT --project=YOUR_GOOGLE_PROJECT_ID` ile yeniden etkinleştir, eski JSON'u Worker secret'ına geri yükleyip deploy et ve Durable Object geçiş penceresini bekle. İyileşmenin ardından eski anahtar artık gerekmiyorsa `gcloud iam service-accounts keys delete ESKI_KEY_ID --iam-account=YOUR_HOMEGRAPH_SERVICE_ACCOUNT --project=YOUR_GOOGLE_PROJECT_ID` ile sil. Google, silmeden önce anahtarı devre dışı bırakıp artık gerekmediğine emin olmayı önerir. [Google anahtarları listeleme ve devre dışı bırakma](https://docs.cloud.google.com/iam/docs/keys-disable-enable) · [Google anahtar silme](https://docs.cloud.google.com/iam/docs/keys-create-delete).
-6. Sonraki döndürme tarihini 90 günlük bakım takvimine yaz. Cloudflare secret değerlerini sonradan göstermez; JSON'un güvenli özgün kopyasını saklamazsan aynı anahtarı geri yükleyemezsin. Cloudflare secret güncellemesi yeni Worker sürümünün dağıtımını gerektirir; dashboard'da Save/Deploy adımını tamamla. Bu proje Worker sürümlerini kademeli dağıtıma alırsa, yeni sürüm yüzde 100'e ulaşmadan ve Durable Object yeni sürümü benimsemeden anahtar döndürme doğrulamasını tamamlanmış sayma.
-
-Yönetim uç noktalarını güvenilir Windows PowerShell 7 oturumundan çağır. Aşağıdaki kod token'ı gizli istemde alır; token'ı komut satırı argümanına veya komut geçmişine koymaz. İstek sırasında token işlem belleğinde kullanılır, bu yüzden kodu yalnız kendi güvendiğin bilgisayarda çalıştır. `WORKER.HESAP.workers.dev` kısmını Cloudflare'daki gerçek Worker adresiyle değiştir.
+1. Create a new JSON key for the same service account and store it in your password
+   manager.
+2. Update `HOMEGRAPH_SERVICE_ACCOUNT` via
+   `node node_modules/wrangler/bin/wrangler.js secret put HOMEGRAPH_SERVICE_ACCOUNT --config wrangler.personal.jsonc`.
+3. Wait at least 6 minutes after deployment so active Durable Objects (`AuthStore`)
+   exceed Cloudflare's 300-second deferred code-update window and reload the new
+   secret.
+4. Run the PowerShell verification snippet below from a trusted workstation to
+   confirm `/admin/homegraph-check` (`authenticated: true`) and
+   `/admin/report-check` (`reported: true`, `matched: true`) using `OPERATOR_TOKEN`:
 
 ```powershell
-$origin = "https://WORKER.HESAP.workers.dev"
+$origin = "https://WORKER.ACCOUNT.workers.dev"
 $secureToken = Read-Host "OPERATOR_TOKEN" -AsSecureString
 $tokenPointer = [IntPtr]::Zero
 $operatorToken = $null
@@ -143,15 +170,15 @@ finally {
 }
 ```
 
-Başarıda `authenticated`, `reported` ve `matched` alanları `true` olur; çevrimdışı lambada rapor kontrolü eşleşme vermez. Bu sorgu fiziksel ampule yazma komutu göndermez. PowerShell'de hata oluşursa hata kodu/değişken içeriği yerine yalnız genel hata türünü kaydet; token'ı hiçbir zaman paylaşma.
+5. Disable the old key via `gcloud iam service-accounts keys disable OLD_KEY_ID ...`,
+   wait up to 60 minutes for any cached short-lived token to expire, re-verify, and
+   then delete the old key (`gcloud iam service-accounts keys delete OLD_KEY_ID ...`).
 
-## 8. Kabul sırası
+## 8. End-to-End Acceptance Sequence
 
-1. Keenetic'te `huectl health --live --json`: doğru sürüm, doğrulanmış BLE, hazır Tunnel.
-2. Worker `/health`: erişilebilir HTTPS origin.
-3. `huectl setup-code`: yeni tek kullanımlık kod.
-4. Google Home'da aynı test hesabıyla `[test] Keenetic Hue` hizmetini bağlama.
-5. Tek aç/kapat ve parlaklık denemesi, sonra mobil internet üzerinden tekrar.
-6. Komut kabulü ile HomeGraph rapor kabulünü ayrı doğrulama; bir hata varsa anahtar/JSON içeriğini paylaşmadan ilgili bileşenin durumunu inceleme.
-
-Tam bulut kaybında eski Google hesabı grant'inin geri geldiği varsayılmaz. Aynı USB yedeğiyle yerel cihazı ayağa kaldırmak, yeni bulut kaynaklarının kabul testini tamamlamaz.
+1. `huectl health --live --json` on the Keenetic router (`healthy: true`).
+2. Worker `/health` endpoint reachable over HTTPS.
+3. `huectl setup-code` in an interactive SSH terminal.
+4. Link `[test] Keenetic Hue` in the Google Home app.
+5. Verify on/off and brightness commands over both LAN Wi-Fi and mobile data, and
+   confirm HomeGraph state parity.

@@ -1,28 +1,46 @@
-# Google Home hesabını bağlama ve kurulum kodu yönetimi
+# Google Home Account Linking and Setup Code Management
 
-Worker sürüm 31’de canlı yeniden bağlama, cihaz senkronizasyonu ve ardından lamba komutu doğrulandı. Worker, bağlama sayfası için güvenli çereze bağlı 10 dakikalık imzalı form üretir. Kurulum kodu yalnız bir kez kullanılır. Başarılı yeniden bağlama önceki Google Home yetkisinin yerine geçer.
+Live account re-linking, device synchronization (`SYNC`), and subsequent lamp
+command execution are verified against Cloudflare Worker revision 31. The Worker
+serves a 10-minute signed authorization form bound to a strict same-origin cookie.
+Each setup code is single-use, and a successful re-link atomically supersedes any
+previous Google Home OAuth grant.
 
-Bu bölüm mevcut Cloudflare/Google kurulumunun yönetimini anlatır. İlk kurulumda Worker, Durable Object, Tunnel/VPC Service ve Google Cloud-to-cloud projesi ayrıca hazırlanmış olmalıdır. Tam bulut kaybı için [Cloudflare/Google yeniden hazırlama kılavuzu](cloud-rebuild.md) vardır; bu akışın yeni hesap/projede canlı kabulü ayrıca yapılmalıdır. Aşağıdaki komut yalnız issuer secret'ını yönetir.
+This guide covers operating an existing Cloudflare and Google Home setup. On a
+first-time deployment, the Worker, Durable Objects, Cloudflare Tunnel/VPC Service,
+and Google Home Cloud-to-cloud project must be provisioned first; see the
+[cloud rebuild guide](cloud-rebuild.md).
 
-## Yeni kod üretmek
+## Issuing a New One-Time Setup Code
 
-Keenetic SSH terminalinde:
+In an interactive Keenetic Entware SSH terminal:
 
 ```sh
 huectl setup-code
 ```
 
-Komut 26 karakterlik kodu ve 600 saniyelik geçerlilik bilgisini gösterir. Yeni kod önceki kullanılmamış kodu geçersiz kılar; bağlı Google hesabının erişimini tek başına kaldırmaz. Kod yalnız bir kez kullanılabilir. Çıkışı dosyaya yönlendirirsen komut kod üretmeden `SETUP_CODE_REQUIRES_TERMINAL` ve çıkış kodu 2 ile durur.
+The command outputs a 26-character one-time code valid for `600` seconds. Issuing a
+new code invalidates any previous unused code without revoking an already linked
+Google Home account. If stdout is redirected to a file or pipe, `huectl` refuses to
+issue a code and exits with `SETUP_CODE_REQUIRES_TERMINAL` (exit code `2`).
 
-Telefonda aynı test kullanıcısının Google hesabıyla Google Home'da cihaz/hizmet ekleme ekranındaki Google ile çalışan hizmetler listesine gir. `[test] Keenetic Hue` sağlayıcısını seç. Açılan hizmet sayfasına yeni kodu girip bağlamayı onayla. Liste adı Google konsolundaki entegrasyon adına bağlıdır. Kodun süresi dolarsa SSH'den yenisini üret. Mevcut bağlantı düzgün çalışıyorsa günlük kullanım için yeni kod gerekmez.
+On your phone, signed into the same test Google account, open the Google Home app
+→ **Add → Works with Google Home**, select **`[test] Keenetic Hue`**, enter the
+one-time code on the authorization page, and approve linking. If the code expires,
+run `huectl setup-code` again. You do not need to generate setup codes during normal
+daily operation once linked.
 
-Kodu, issuer anahtarını veya token dosyalarını destek mesajlarına yapıştırma. Normal yönetim için yapay zekâ, MCP veya Google şifresini bu servise verme gereksinimi yoktur.
+Never paste setup codes, issuer tokens, or API tokens into support messages.
 
-## Issuer anahtarını ilk kez kurmak veya döndürmek
+## Provisioning or Rotating the Setup-Code Issuer Token
 
-Bu yetki yalnız `/admin/setup-code` üzerinden kısa ömürlü kod üretir. Lamba kontrolü, hesap iptali ve HomeGraph yönetimi yapamaz. Cloudflare genel API anahtarı veya operator token'ı Keenetic'e kopyalanmaz.
+The setup-issuer credential (`SETUP_ISSUER_TOKEN`) authorizes only `/admin/setup-code`
+requests to mint short-lived setup codes. It cannot control the lamp, revoke OAuth
+grants, or manage HomeGraph. General Cloudflare API tokens and `OPERATOR_TOKEN` are
+never stored on the Keenetic router.
 
-PC'de proje kökünden, kilit dosyasındaki Wrangler sürümünü kur ve Cloudflare'ın kendi giriş akışını tamamla:
+On your workstation from the repository root, install the locked Wrangler version
+and authenticate with Cloudflare:
 
 ```sh
 cd cloud
@@ -32,31 +50,43 @@ cd ..
 node tools/cloud-bootstrap.mjs generate-issuer
 ```
 
-Son komut, yalnız açık terminalde 32 rastgele bayttan üretilmiş 64 küçük hex karakterini gösterir. Anahtarı parola yöneticisine kaydet. Terminal kaydı alan bir oturumda çalıştırma. Ardından:
+`generate-issuer` prints a 64-character hex token (32 random bytes) only in an
+interactive terminal. Save it in your password manager, then provision it to the
+Worker:
 
 ```sh
 node tools/cloud-bootstrap.mjs provision-issuer
 ```
 
-Anahtarı gizli girişe yapıştır. Araç anahtarı Wrangler'a stdin üzerinden verir; argv'ye veya depo dosyasına yazmaz. Alt süreç çıktısı hata ayrıntılarıyla birlikte bastırılır. Başarılı sonuç `SETUP_ISSUER_TOKEN` güncellendi bilgisidir. İşlem `keenetic-hue-relay` Worker'ını hedefler; öncesinde doğru Cloudflare hesabında olduğunu denetle. Araç genel bir Worker/Tunnel/Google proje kurucusu değildir.
+Paste the token at the hidden prompt. The helper passes the secret to Wrangler via
+`stdin` (never via command-line arguments or repository files) and updates
+`SETUP_ISSUER_TOKEN` on the `keenetic-hue-relay` Worker.
 
-Sonra Keenetic SSH terminalinde **kendi Worker HTTPS origin adresini** kullan:
+Next, in your Keenetic Entware SSH terminal, configure the router with your Worker's
+HTTPS origin:
 
 ```sh
-huectl configure-issuer --origin https://WORKER.HESAP.workers.dev
+huectl configure-issuer --origin https://WORKER.ACCOUNT.workers.dev
 ```
 
-Aynı anahtarı gizli girişe yapıştır. HTTPS origin'e yol, sorgu, kullanıcı adı veya parola ekleme. Araç önce uzak kod üretme yetkisini doğrular; başarısız doğrulamada mevcut yerel anahtarı değiştirmez. Başarılı sonuç `configured: true` ve `authority: setup-code-only` içerir. Doğrulama sırasında üretilen kod gösterilmez; sonra `huectl setup-code` ile kullanacağın kodu üret.
+Paste the same token at the hidden prompt. Do not include paths, query strings, or
+credentials in the `--origin` URL. `huectl` verifies remote setup-code issuance
+before replacing the local token file; if verification fails, the existing local
+credential is preserved. A successful check returns `configured: true` and
+`authority: setup-code-only` without displaying the test code. Afterward, run
+`huectl setup-code` whenever you need a user-facing code.
 
-Anahtar döndürülürken Cloudflare güncellemesi ile cihaz güncellemesi arasında kod üretimi geçici olarak çalışmayabilir; mevcut Google hesabı bağlantısı ve lamba kontrolü bu issuer anahtarına bağlı değildir. Elektrik kesilmesiyle yerel iki dosya güncellemesi yarım kalırsa aynı `configure-issuer` komutunu tekrar çalıştır. Çok dosyalı güncellemenin tek atomik işlem olduğu varsayılmaz.
+While rotating the issuer token, setup-code generation is briefly unavailable
+between the Cloudflare update and the router update, but existing Google Home OAuth
+tokens and lamp commands continue to work uninterrupted. To revoke the router's
+ability to mint setup codes at any time, rotate or delete `SETUP_ISSUER_TOKEN` in
+Cloudflare.
 
-Issuer anahtarını iptal etmek için yetkili Cloudflare oturumunda bu Worker'ın `SETUP_ISSUER_TOKEN` secret'ını kaldır veya yeni rastgele değerle değiştir. Bu işlem mevcut Google hesabının OAuth erişimini iptal etmez; hesap iptali ayrı operatör işlemidir.
+## Reinstallation Boundaries
 
-## Yeniden kurulum sınırları
-
-- Yalnız Entware/USB yenilenmişse cihaz yedeği ve aynı bulut kaynakları kullanılır. Boş kurulum geri yükleme yolu cihazdaki izole işlev provasını geçti; fiziksel USB'yi silerek yapılan bir prova iddia edilmez. [Yeniden kurulum kılavuzunu](reinstall.md) kullan.
-- Worker/Tunnel kaybedilmişse Tunnel/VPC Service ve Worker binding'leri yeniden hazırlanır; Tunnel token'ı yenilenir. Yalnız issuer komutu bunu yapmaz.
-- Google projesi/hizmet hesabı anahtarı kaybedilmişse Google konsolunda API, hizmet hesabı ve JSON anahtarı yeniden hazırlanıp Worker secret'ına yüklenir. Cloudflare secret değerlerinin geri okunabildiği varsayılmaz.
-- Google veya Cloudflare'ın hukuki şartları kullanıcı tarafından kabul edilir; kurulum araçları bu kabulü otomatik yapmaz.
-
-Bu bulut kurulum prosedürlerinin ayrıntıları [bulut kılavuzundadır](cloud-rebuild.md). Yeni hesap/projede baştan sona canlı kabul ayrı bir iştir; mevcut yönetim komutlarının çalışması bunun tamamlandığı anlamına gelmez.
+- **Router USB/Entware replaced only:** Restore from your `.huebak` backup and keep
+  using the existing cloud resources ([reinstallation guide](reinstall.md)).
+- **Worker or Tunnel lost:** Re-create the Tunnel/VPC Service and Worker bindings
+  and provision a fresh Tunnel token ([cloud rebuild guide](cloud-rebuild.md)).
+- **Google Cloud project or service account key lost:** Re-create the HomeGraph
+  service account key and update the `HOMEGRAPH_SERVICE_ACCOUNT` Worker secret.

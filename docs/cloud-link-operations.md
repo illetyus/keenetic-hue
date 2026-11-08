@@ -1,22 +1,37 @@
-# Bulut bağlantısı — günlük işletim
+# Cloud Link — Daily Operations
 
-Bu sayfa eski G4 tek ajan düzeninin teknik notlarını güncel birleşik Hue/Entware işletim yordamıyla değiştirir. Çalışan kurulumda ikinci ajan başlatma, `/opt/var/lib/hue-agent` altındaki eski token dosyalarını düzenleme veya eski G4 HTTP uçlarını çağırma.
+This guide covers routine operation of the unified Keenetic Hue cloud bridge. Never
+start a second standalone agent instance, manually edit token files under legacy
+directories, or call deprecated internal HTTP endpoints on a running router.
 
-## Güvenli ilk kontrol
+## Safe First Check
 
 ```sh
 huectl status
 huectl health --live --json
 ```
 
-`status` sahip süreçleri; canlı `health` ise yerel API, BLE ve Tunnel durumunu denetler. Sağlıklı RC12 kontrolü `healthy: true` ve çıkış kodu `0` verir. Bu sorgular bulutta HomeGraph raporunun kabul edildiğini ölçmez; `reporting: unknown` veya `NOT_CHECKED` tek başına hata değildir.
+`status` checks owned service processes; `health --live --json` probes the local
+API, live BLE readback, and outbound Tunnel readiness. A healthy RC12 check returns
+`healthy: true` and exit code `0`. Because local health queries do not call Google's
+HomeGraph API, `reporting: unknown` (`NOT_CHECKED`) is normal and not an error.
 
-## Hangi bileşen yeniden başlatılır
+## Which Component to Restart
 
-- Ajan/BLE sorunu: önce USB, Bluetooth adaptörü ve ampul elektriğini kontrol et; sonra gerekirse `huectl restart agent` ve `huectl health --live --json`.
-- Yalnız Tunnel sorunu: WAN, DNS ve modem saatini kontrol et; gerekirse `huectl restart tunnel` ve canlı sağlık sorgusu.
-- Yerel canlı sağlık iyi ama Google Home çevrimdışıysa bağlantıyı kaldırıp yeniden bağlama ilk adım değildir. Önce Worker/Tunnel/Google tarafını [bulut yeniden kurma kılavuzundan](cloud-rebuild.md) ayırarak incele.
+- **Agent / BLE issue:** First check the USB port, Bluetooth adapter, and physical
+  mains power to the Hue bulb; then if needed run `huectl restart agent` followed by
+  `huectl health --live --json`.
+- **Tunnel-only issue:** Check router WAN connectivity, DNS, and system clock; if
+  needed run `huectl restart tunnel` followed by a live health check.
+- **Local live health is healthy, but Google Home shows offline:** Do **not**
+  immediately unlink and re-link your Google Home account. Diagnose the
+  Worker/Tunnel/Google boundary separately using the [cloud rebuild guide](cloud-rebuild.md).
 
-Yeni bir Google hesabı bağlanacaksa mevcut bağlantıyı bozmadan terminalde `huectl setup-code` çalıştır. Kod 600 saniyede sona erer ve yalnız Google Home'da bir kez kullanılır; dosyaya veya günlüğe yönlendirme. Ayrıntı: [Google Home ve kurulum kodu](google-home.md).
+When linking a Google account, run `huectl setup-code` in an interactive SSH
+terminal without disturbing existing configuration. The one-time code expires in
+`600` seconds; never redirect it to a file or log. Details:
+[Google Home account linking](google-home.md).
 
-Worker'ın genel `/health` yanıtı yalnız Worker'ın erişilebilir olduğunu gösterir; modemde BLE, API veya Google Home kontrolünü kanıtlamaz. Worker secret değerleri daha sonra okunamaz; kaynak/hesap yenileme durumunu ayrı doğrula.
+The Cloudflare Worker's public `/health` endpoint confirms only that the Worker
+HTTPS origin is reachable; it does not prove router BLE, local API, or Google Home
+command health.

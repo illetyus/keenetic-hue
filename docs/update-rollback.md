@@ -1,24 +1,22 @@
-# İmzalı güncelleme, onarım ve geri alma
+# Signed Updates, Repair, and Rollback
 
-Bu yordamları imzası ve içeriği doğrulanmış paketlerle kullan. RC11 ile RC5'e
-kontrollü geri dönüş ve ardından normal güncelleme yoluyla RC11'in etkinleştirilmesi
-Keenetic üzerinde doğrulandı.
+Use these procedures only with Ed25519-signed `.huerel` bundles whose public key
+fingerprint and SHA-256 digest have been verified. Controlled rollback and normal
+forward updates are verified on the Keenetic router.
 
-Yeni paketler imzalı `releaseSequence` içerir. Normal güncelleme daha düşük sırayı reddeder; aynı sırada farklı içerik kabul edilmez. `rollback` kayıtlı önceki sürümü seçer ve en yüksek kabul edilen sırayı düşürmez. Eski sıra numarasız paketler mevcut slot onarımı/kurtarma için saklanır. İlk güvenlik sürümüne geçişte yeni bağımsız installer ile yönetim doğrulayıcısı da yenilenmelidir.
+Signed release manifests carry a monotonic `releaseSequence`. Normal updates reject
+lower sequence numbers and reject different archive contents claiming the same
+sequence. `huectl rollback` switches to the recorded previous verified slot without
+lowering the highest accepted sequence floor.
 
-RC3 veya daha eski, sıra alanını tanımayan bir sürümden ilk geçişte güvenilir bağımsız installer'ı yeni paket ve sabitlenmiş açık anahtarla çalıştırın. Installer yeni slotu ve özel recovery manager'ı hazırlar; henüz aktif eski manager yeni manifesti okuyamaz. Bu tek geçiş için yeni recovery manager üzerinden güncelleyin:
+Before updating, create a fresh password-protected [`.huebak` backup](backup-restore.md)
+and store it off the router USB drive. Software bundles and personal `.huebak`
+backups are separate: an update never overwrites private configuration or BLE bond
+files from the bundle.
 
-```sh
-python3 -I -c 'import sys; sys.dont_write_bytecode=True; sys.path.insert(0,"/opt/var/lib/keenetic-hue-system/manager"); from hue_admin.cli import main; sys.exit(main(["update",sys.argv[1]]))' /opt/var/lib/keenetic-hue-system/backups/candidates/0.2.0-rc.4.huerel
-```
+## Applying a Signed Update
 
-Bu komutu yalnız bağımsız installer'ın imza ve açık anahtar parmak izi doğrulaması başarılı olduktan sonra kullanın. Yeni sürüm aktifken normal `huectl update` kullanılır. Eski RC3'e açık rollback yapıldıktan sonra RC4'e tekrar geçişte de bu uyumluluk yolu gerekebilir.
-
-Güncellemeden önce kişisel parolalı yeni bir [yedek](backup-restore.md) al ve başka bir diskte sakla. Yazılım paketi ile özel yedek ayrı dosyalardır. Güncelleme yapılandırma veya bond dosyasını paketten değiştirmez.
-
-## Güncelleme
-
-İmzalı paketi SFTP ile özel bir klasöre kopyala:
+Copy the signed `.huerel` archive via SFTP into a private `root`-only directory:
 
 ```sh
 huectl health --live --json
@@ -26,35 +24,55 @@ huectl update /opt/var/tmp/hue-install/keenetic-hue-VERSION.huerel
 huectl health --live --json
 ```
 
-İmza, tam dosya listesi/hash'ler, mimari, Python ABI, sabitlenmiş bağımlılıklar ve kalıcı durum şeması doğrulanır. Önce iki sahip durdurulur, sonra seçili sürüm atomik dosya değişimiyle seçilir. Ajan ve Tunnel başlatılır. Sağlık yanıtının gerçekten beklenen sürüm kimliğine ait olması gerekir; eski bir HTTP sunucusunun yanıtı yeni sürümün sağlığı sayılmaz.
+`huectl update` verifies the Ed25519 signature, complete file manifest and hashes,
+target CPU architecture, Python ABI, pinned native/Python dependencies, and
+persistent state schema. It stops both service principals, switches the selected
+release via atomic file replacement (`active.json`), and starts the new `hue-agent`
+and `hue-tunnel` processes. Live health checks require the responding process to be
+owned by the newly selected release ID—an older HTTP listener cannot satisfy
+readiness for the new slot.
 
-Sağlık kabulü için en fazla 60 saniye beklenir. Başarısızlıkta yeni sahipler durdurulur ve önceki sürüme dönülür. Bu sırada Google Home kısa süre çevrimdışı görebilir. Bakım komutunun başarılı olması ampulün fiziksel elektriğinin açık olduğunu garanti etmez; `health --live` ayrı kontroldür.
+`huectl` waits up to 60 seconds for live health acceptance. If health fails, the new
+processes are stopped and the system automatically rolls back to the previous
+verified release.
 
-## Önceki sürüme dönme
+## Rolling Back to the Previous Release
 
 ```sh
 huectl rollback
 huectl health --live --json
 ```
 
-`active.json` içindeki önceki doğrulanmış sürüm seçilir. İmzalı yuvalar ve özel yedekler otomatik silinmez; en az iki iyi sürümü koru. Eski kalıcı durum şemasını okuyamayan sürüme geçiş desteklenmiş sayılmaz. Mevcut şema sözleşmesi sürüm 1'dir; veri dönüştürme gerektiren gelecekteki bir sürüm ayrıca planlanmalıdır.
+`huectl rollback` activates the previous verified release recorded in `active.json`.
+Signed release slots and personal backups are not deleted automatically; keep at
+least two verified release slots installed.
 
-## Bozuk yazılımı onarma
+## Repairing a Damaged Release Slot
 
 ```sh
 huectl repair /opt/var/tmp/hue-install/keenetic-hue-VERSION.huerel
 huectl health --live --json
 ```
 
-Aynı sürüm kimliği için farklı imzalı içerik kabul edilmez. Aynı doğrulanmış arşivle bozuk dosyalar yeniden kurulur. Aktif sürümün onarımında önce sahipler durdurulur; çalışan dosyaların üzerine parça parça yazılmaz. Arızalı eski dosyalar inceleme için özel konuma alınır.
+`huectl repair` requires the exact same signed archive for the target release ID. It
+stops the running service principals, preserves mutable agent state (BLE bond and
+command journal), moves damaged code/projection directories to a private quarantine,
+reinstalls the verified files, and runs live health checks.
 
-## Elektrik kesilmesi veya yarım bakım
+## Power Loss or Interrupted Maintenance
 
 ```sh
 huectl recover
 huectl health --live --json
 ```
 
-Makbuzlar bootstrap, boş kurulum geri yükleme, eski düzenden taşıma, özel yedek geri yükleme, paket kurulumu ve etkin sürüm seçimi için ayrı tutulur. Her işlem tek bir atomik dosya değişimiymiş gibi sunulmaz. Tam doğrulanmış paket aşaması tamamlanabilir; yarım taşıma/geri yükleme güvenli önceki duruma döner. Eksik veya değiştirilmiş kurtarma girdisinde işlem devam ettirilmez. Gerekirse güvenilir bağımsız [kurulum aracını](installation.md) aynı arşivle yeniden çalıştır.
+Separate transactional receipts track bootstrap, clean-install initialization,
+legacy migration, backup restore, package staging, and active slot selection. If an
+operation is interrupted by power loss, `huectl recover` (or the next `S97` boot)
+completes fully staged steps or safely rolls back incomplete transitions. If the
+manager binary itself was interrupted mid-bootstrap, re-run the standalone
+[installation command](installation.md).
 
-`SERVICE_ALREADY_MANAGED` yalnız beklenen sürümün sahip sürecinin zaten var olduğunu belirtir. BLE, Tunnel ve internet sağlığı için `health --live --json` kullan. `reporting: unknown`, yerel CLI'nin HomeGraph kabulünü bağımsız olarak ispatlamadığı anlamına gelir.
+`SERVICE_ALREADY_MANAGED` simply indicates that the expected release's supervisor
+and child processes are already running. Use `huectl health --live --json` to verify
+live BLE and Tunnel readiness.
