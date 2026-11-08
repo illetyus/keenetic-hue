@@ -2,75 +2,138 @@
 
 ![Keenetic Hue — Hue BLE, Entware ve Google Home arasında kontrollü bağlantı](docs/assets/hero.png)
 
-**Hue BLE lambanı Keenetic üzerinden Google Home'a bağla.**
+**Philips Hue BLE lambanı ayrı bir Hue Bridge veya gelen port açmadan, Keenetic router üzerindeki imzalı ve izole Entware ajanıyla Google Home'a bağla.**
 
-USB Bluetooth adaptörü takılı Keenetic üzerindeki Entware ajanı lambayı yönetir.
-Cloudflare Worker ve dışarı doğru kurulan Tunnel, Google Home komutlarını yerel
-ajana ulaştırır; router'da gelen port açılması gerekmez.
+[English overview](README.en.md) · [Kurulum](docs/installation.md) · [Mimari](docs/architecture.md) · [Güvenlik](SECURITY.md) · [RC12 Sürüm Notları](docs/releases/0.2.0-rc.12.md) · [Depo Tasarım Araştırması](docs/repository-design.md)
 
-[English overview](README.en.md) · [Kurulum](docs/installation.md) · [Güvenlik](SECURITY.md) · [RC12 notları](docs/releases/0.2.0-rc.12.md)
+> **Durum (`v0.2.0-rc.12`):** Belgelenen kişisel donanım profilinde canlı komut, HomeGraph durum bildirimi ve router yeniden başlatma (reboot) kabulünü geçmiş aday sürüm. Evrensel bir Hue Bridge ikamesi veya Google sertifikalı ticari ürün değildir; farklı donanımlar ve sıfırdan açılan Google/Cloudflare hesapları ayrı doğrulama gerektirir.
 
-> **Durum:** Kişisel kurulumda kabul edilmiş RC12 adayı. Evrensel Hue Bridge
-> alternatifi veya Google sertifikalı ürün değildir. Farklı donanım ve yeni
-> Google/Cloudflare hesaplarıyla uçtan uca ilk kurulum ayrıca doğrulanmalıdır.
+---
 
-## Neler yapar?
+## Neden Keenetic Hue? (`Why`)
 
-- Açma/kapatma ve beyaz ışık parlaklığı kontrolü.
-- Tek kullanımlık kodla kişisel Google Home hesap bağlama.
-- Bağlantı kaybında sınırlı yeniden deneme; Entware açılışında otomatik başlama.
-- İmzalı sürümler, geri alma, şifreli yedek ve aynı kurulumun geri yüklenmesi.
-- Ayrı servis kimlikleri; belirsiz fiziksel komutları tekrar göndermeyen kayıt sistemi.
-- Özgün SQLite/journal çiftini koruyan, geçici kopyada yetkisiz süreçle kurtarma.
+Tek bir Bluetooth Low Energy (BLE) Hue ampulü uzaktan ve Google Home üzerinden yönetmek istediğinizde standart seçenekler ya ek bir fiziksel köprü (Hue Bridge) satın almayı ya da ev ağına gelen (inbound) port açıp genel amaçlı bir ev otomasyon sunucusu kurmayı gerektirir. **Keenetic Hue**, evde zaten 7/24 açık duran Keenetic router'ın USB portunu ve Entware ortamını savunmacı bir sistem mühendisliği yaklaşımıyla kullanır:
 
-## Nasıl bağlanır?
+| Tasarım Boyutu | Tipik Hobi / Köprü Kurulumu | Keenetic Hue Yaklaşımı |
+| --- | --- | --- |
+| **Ağ Yüzeyi** | Router'da gelen port açma veya tam ağ erişimli VPN | **Gelen port açılmaz:** Yalnızca router'dan dışarı doğru (`outbound`) kurulan Cloudflare Tunnel ve dar kapsamlı Worker |
+| **Anahtar ve Kimlik Sınırı** | Bulut ve yerel anahtarların aynı süreçte/ortamda tutulması | **Sıkı ayrım:** OAuth ve HomeGraph bulutta; BLE bond anahtarı ve yerel API sırları (`0600`) yalnızca router üzerinde kalır |
+| **Süreç İzolasyonu** | Tüm servislerin `root` olarak tek süreçte çalışması | **Ayrılmış servis kimlikleri:** BLE ajanı `hue-agent` (`61001`), tünel `hue-tunnel` (`61000`) kimliğiyle çalışır; `SO_PEERCRED` ve `boot_id` doğrulanır |
+| **Fiziksel Komut Güvenliği** | Ağ zaman aşımında komutu körü körüne tekrar gönderme (lamba yanıp sönmesi) | **Belirsiz komut koruması:** Fiziksel GATT okumasıyla doğrulanamayan komut `OUTCOME_UNKNOWN` olarak kaydedilir ve otomatik tekrarlanmaz |
+| **Veritabanı Kurtarma** | Ani güç kesintisinde bozulan SQLite dosyasını `root` ile doğrudan açma veya silme | **Opak ikili koruma:** Özgün `commands.sqlite` + `journal` çifti `0700` altında saklanır; kurtarma yalnızca geçici kopyada yetkisiz ajan kimliğiyle yapılır |
+| **Güncelleme ve Geri Dönüş** | Elle dosya kopyalama (`scp`) ve bozulduğunda sıfırdan kurulum | **Ed25519 imzalı `.huerel` paketi:** Atomik sürüm seçimi (`active.json`), sağlık doğrulaması ve başarısızlıkta otomatik `rollback` |
+
+---
+
+## Mimari ve Güven Sınırları
 
 ![Google Home → Worker → Tunnel → Entware ajanı → Bluetooth Hue lambası](docs/assets/architecture.svg)
 
-OAuth ve HomeGraph bulutta, BLE bond ve yerel kontrol Keenetic'te kalır.
-[Mimari ve güven sınırları](docs/architecture.md).
+OAuth hesap bağlama ve Google HomeGraph bildirimleri Cloudflare Worker katmanında; BLE GATT iletişimi, komut günlüğü ve donanım kilidi Keenetic üzerinde kalır. Ayrıntılı süreç ve hata modeli için: **[Mimari ve güven sınırları](docs/architecture.md)**.
 
-## Doğrulanan profil
+---
 
-| Bileşen | Kabul edilen kurulum |
+## Özellik – Kaynak Kod – Doğrulama Testi İzlenebilirliği
+
+Depodaki her temel yetenek doğrudan ilgili modüle ve taşınabilir doğrulama testine bağlıdır:
+
+| Yetenek / Güvenlik Sınırı | Kaynak Modül | Doğrulama Testi |
+| --- | --- | --- |
+| **BLE GATT kontrolü ve fiziksel durum doğrulaması (`verified` / `OUTCOME_UNKNOWN`)** | [`hue_agent/agent.py`](hue_agent/agent.py), [`hue_agent/lamp.py`](hue_agent/lamp.py), [`hue_agent/bumble_io.py`](hue_agent/bumble_io.py) | [`tests/test_agent.py`](tests/test_agent.py), [`tests/test_core.py`](tests/test_core.py) |
+| **Korumalı SQLite kurtarma (özgün DB/journal koruma + yetkisiz alt süreç)** | [`hue_admin/agent_storage.py`](hue_admin/agent_storage.py), [`hue_admin/agent_runtime.py`](hue_admin/agent_runtime.py) | [`tests/test_sqlite_crash_recovery.py`](tests/test_sqlite_crash_recovery.py), [`tests/test_agent_recovery.py`](tests/test_agent_recovery.py) |
+| **Ayrılmış servis kimlikleri (`hue-agent`, `hue-tunnel`) ve süreç sahipliği (`boot_id` + `startTicks`)** | [`hue_admin/privileges.py`](hue_admin/privileges.py), [`hue_admin/service_manager.py`](hue_admin/service_manager.py), [`hue_admin/child_identity.py`](hue_admin/child_identity.py) | [`tests/test_privilege_boundary.py`](tests/test_privilege_boundary.py), [`tests/test_agent_process_identity.py`](tests/test_agent_process_identity.py) |
+| **Birleşik sağlık sorgusu (`SO_PEERCRED` Unix soketi ve bileşen doğrulaması)** | [`hue_admin/unified_health.py`](hue_admin/unified_health.py), [`hue_admin/health.py`](hue_admin/health.py) | [`tests/test_unified_health.py`](tests/test_unified_health.py), [`tests/test_health_peer.py`](tests/test_health_peer.py) |
+| **Ed25519 imzalı `.huerel` paketleme, kurulum ve atomik geri alma (`rollback`)** | [`deploy/build_release.py`](deploy/build_release.py), [`deploy/install_release.py`](deploy/install_release.py), [`hue_admin/releases.py`](hue_admin/releases.py) | [`tests/test_build_release.py`](tests/test_build_release.py), [`tests/test_update.py`](tests/test_update.py) |
+| **Parola korumalı şifreli yedek (`.huebak`) ve atomik geri yükleme** | [`hue_admin/backup.py`](hue_admin/backup.py), [`hue_admin/restore.py`](hue_admin/restore.py), [`hue_admin/restore_transaction.py`](hue_admin/restore_transaction.py) | [`tests/test_backup_restore.py`](tests/test_backup_restore.py), [`tests/test_restore_transaction.py`](tests/test_restore_transaction.py) |
+| **Google Home Smart Home (`SYNC`/`QUERY`/`EXECUTE`), OAuth 2.0 ve HomeGraph** | [`cloud/src/index.ts`](cloud/src/index.ts), [`cloud/src/google-home.ts`](cloud/src/google-home.ts), [`cloud/src/homegraph.ts`](cloud/src/homegraph.ts) | [`cloud/test/google-home.test.ts`](cloud/test/google-home.test.ts), [`cloud/test/homegraph.test.ts`](cloud/test/homegraph.test.ts) |
+
+---
+
+## Doğrulanan Donanım ve Ortam Profili
+
+| Bileşen | Kabul Edilen Kurulum |
 | --- | --- |
-| Lamba | Philips Hue White LWA017 — BLE, aç/kapat ve parlaklık |
-| Bluetooth | Belkin BCM20702A0 USB adaptörü |
-| Router ortamı | Keenetic + ext4 USB üzerinde Entware, `mips-3.4` |
-| Çalışma zamanı | CPython 3.13; kesin sürümler [kilit dosyasında](requirements-router.lock.json) |
-| Bulut | Kendi Cloudflare Worker/Tunnel ve Google Home geliştirme projen |
+| **Lamba** | Philips Hue White **LWA017** — BLE, açma/kapatma ve beyaz ışık parlaklığı |
+| **Bluetooth Adaptörü** | Belkin **BCM20702A0** USB HCI adaptörü (Google Bumble kullanıcı alanı yığını ile) |
+| **Router Ortamı** | Keenetic + ext4 USB depolama üzerinde Entware (`mips-3.4`) |
+| **Çalışma Zamanı** | CPython **3.13**; tüm Python ve yerel paket özetleri [`requirements-router.lock.json`](requirements-router.lock.json) içinde kilitlidir |
+| **Bulut Katmanı** | Kişisel Cloudflare Worker + Tunnel ve Google Home geliştirme projesi (`[test] Keenetic Hue`) |
 
-RC12 mevcut kurulumda komut ve router reboot kabulünü geçti. Bu sonuç bütün
-Keenetic/Hue ürünleri için uyumluluk garantisi değildir. Renk, Matter ve ses
-aktarımı doğrulanmış kapsamda değildir.
+> **Kapsam Sınırı:** Renk sıcaklığı/RGB, Matter, Zigbee/Hue Bridge ve ses akışı bu projenin doğrulanmış kapsamında değildir.
 
-## Nereden başlamalıyım?
+---
 
-| Yapmak istediğin | Kılavuz |
+## 3 Aşamalı Başlangıç ve Doğrulama Özeti
+
+### 1. Ön Koşullar (Pre-installation)
+- Keenetic üzerinde `ext4` biçimli USB depolama, çalışan Entware ortamı ve [`requirements-router.lock.json`](requirements-router.lock.json) içindeki bağımlılıklar ([hazırlık adımları](docs/reinstall.md#2-entwarei-hazırlama)).
+- İmzalı `keenetic-hue-0.2.0-rc.12.huerel` paketi, bağımsız doğrulanmış [`keys/release-trust.pub`](keys/release-trust.pub) açık anahtarı (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`) ve [`deploy/install_release.py`](deploy/install_release.py) kurucusu.
+
+### 2. İmzalı Kurulum ve Yapılandırma (Installation)
+- **Boş Entware ortamına imzalı paketi doğrulayarak kurmak için:** [Kurulum ve dosya düzeni](docs/installation.md) kılavuzundaki `sha256sum -c` + `python3 -I install_release.py` komutunu çalıştır.
+- **Aynı donanımı şifreli yedekten (`.huebak`) geri yüklemek için:** [Yedekten yeniden kurulum](docs/reinstall.md) ve [Şifreli yedek ve geri yükleme](docs/backup-restore.md) adımlarını izle.
+- **Bulut ve Google Home bağlantısı için:** [Bulut kurulumu](docs/cloud-rebuild.md) ve [Google Home hesap bağlama](docs/google-home.md) belgelerini uygula. *(Yazılım paketi kişisel kimlik bilgisi veya BLE bond anahtarı içermez; [`config.example.json`](config.example.json) yalnızca şema örneğidir.)*
+
+### 3. Kurulum Sonrası Doğrulama (Post-installation Verification)
+Entware terminalinde canlı sağlık kontrolünü çalıştır:
+
+```sh
+huectl status
+huectl health --live --json
+```
+
+Sağlıklı ve sürüm sahipliği doğrulanmış bir kurulum aşağıdaki yapıda yanıt döner (değerler sterilize edilmiş gerçek RC12 şemasıdır):
+
+```json
+{
+  "schemaVersion": 1,
+  "healthy": true,
+  "releaseId": "0.2.0-rc.12",
+  "components": {
+    "agent":     { "state": "running", "reason": "OWNED_VERSION" },
+    "tunnel":    { "state": "ready",   "reason": "TUNNEL_READY" },
+    "manager":   { "state": "running", "reason": "BOTH_COMPONENTS_OWNED" },
+    "localApi":  { "state": "ready",   "reason": "API_RESPONSE" },
+    "ble":       { "state": "ready",   "reason": "VERIFIED" },
+    "reporting": { "state": "unknown", "reason": "NOT_CHECKED" }
+  },
+  "principals": {
+    "agent":  { "expectedUid": 61001, "expectedGid": 61001 },
+    "tunnel": { "expectedUid": 61000, "expectedGid": 61000 }
+  }
+}
+```
+
+---
+
+## Göreve Göre Kılavuzlar
+
+| Yapmak İstediğin İşlem | Kılavuz |
 | --- | --- |
-| Boş Entware ortamına imzalı yazılımı kurmak | [Kurulum](docs/installation.md) |
-| Aynı adaptör ve ampulle yeni USB’ye geçmek | [Yedekten yeniden kurulum](docs/reinstall.md) |
+| Boş Entware ortamına imzalı yazılımı kurmak | [Kurulum ve dosya düzeni](docs/installation.md) |
+| Aynı adaptör ve ampulle yeni USB'ye geçmek | [Yedekten yeniden kurulum](docs/reinstall.md) |
 | Kendi Cloudflare ve Google Home kaynaklarını hazırlamak | [Bulut kurulumu ve kurtarma](docs/cloud-rebuild.md) |
-| Google Home’a bağlamak veya yeni kod almak | [Google Home hesabını bağlama](docs/google-home.md) |
-| Durumu kontrol etmek, yedek almak veya güncellemek | [Günlük bakım](docs/maintenance-quickstart.md) |
-| Bir arızayı veya çevrimdışı durumu incelemek | [Sorun giderme](docs/troubleshooting.md) |
+| Google Home'a bağlamak veya tek kullanımlık kurulum kodu almak | [Google Home hesabını bağlama](docs/google-home.md) |
+| Günlük durum kontrolü, şifreli yedek veya güncelleme yapmak | [Günlük bakım — hızlı başvuru](docs/maintenance-quickstart.md) |
+| Güncelleme, geri alma (`rollback`) ve onarım akışını incelemek | [Güncelleme, onarım ve geri alma](docs/update-rollback.md) |
+| Bir arızayı veya çevrimdışı durumu teşhis etmek | [Sorun giderme](docs/troubleshooting.md) |
 | Gelişmiş USB bakımı için RAM araç paketini hazırlamak | [Yerel ayarlar ve bakım yardımcısı](docs/storage-maintenance.md) |
 
-İmzalı Keenetic paketi, açık doğrulama anahtarı ve bağımsız kurucu birlikte kullanılır. Keenetic paketinin sürümü ile Worker sürümü ayrı yönetilir. Google Home’daki geliştirme entegrasyonu `[test] Keenetic Hue` adıyla görünür.
+---
 
-Boş Entware’e yazılım kurulumu, BLE eşleştirmesi ve bulut yetkilendirmesi ayrı aşamalardır. İlk defa kurulacak bir sistemde, imzalı paket dışında kendi donanımın için BLE eşleştirmesi ve özel yapılandırma gerekir. Bu depoda doğrulanmış otomatik başlatma yolu, aynı kurulumun şifreli yedeğini geri yüklemektir.
+## Yerel Kaynak Kontrolleri, Katkı ve Lisans
 
-Yerel kabul için Entware terminalinde `huectl health --live --json` çalıştır. Google Home kontrolünü ve durum bildirimini ayrıca doğrula.
+Taşınabilir kaynak testlerini ve yayın hijyeni denetimini yerel iş istasyonunda çalıştırmak için:
 
-## Kaynak, katkı ve destek
+```sh
+python tools/check_publication.py
+python tools/run_portable_tests.py
+cd cloud && npm run typecheck && npm test
+```
 
-`hue_agent/` BLE ajanını, `hue_admin/` servis/bakım sınırlarını, `cloud/` Google
-Home katmanını ve `deploy/` imzalı paket araçlarını içerir. Kaynak testleri
-fiziksel cihaz kabulünün yerini tutmaz; [katkı kılavuzuna](CONTRIBUTING.md) bak.
+> Kaynak testleri (81 Python testi + 64 Cloudflare Worker testi) mantıksal sözleşmeleri doğrular; fiziksel BLE radyo ve donanım kabulünün yerini tutmaz. Ayrıntılar için: [Katkı kılavuzu](CONTRIBUTING.md).
 
-Hata bildiriminde token, özel anahtar, bond, kurulum kodu veya yedek paylaşma.
-[Güvenlik bildirimleri](SECURITY.md) · [Destek](SUPPORT.md) · [Sunum araştırması](docs/repository-design.md)
+Hata bildirimlerinde token, özel anahtar, BLE bond, kurulum kodu veya `.huebak` yedeği paylaşmayın.  
+[Güvenlik bildirimleri](SECURITY.md) · [Destek](SUPPORT.md) · [Depo tasarım araştırması](docs/repository-design.md)
 
-Proje kodu [MIT lisanslıdır](LICENSE). Diğer bileşenler kendi lisanslarını korur;
-[üçüncü taraf açıklamaları](THIRD_PARTY_NOTICES.md). Ürün adları ilgili hak
-sahiplerine aittir; proje bu kuruluşların resmî veya onaylı ürünü değildir.
+Proje kaynak kodu [MIT lisanslıdır](LICENSE). Üçüncü taraf bileşenler kendi lisanslarını korur; ayrıntılar için [üçüncü taraf açıklamaları](THIRD_PARTY_NOTICES.md) ve [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt) dosyalarına bakın. Ürün adları ilgili hak sahiplerine aittir; bu proje ilgili kuruluşların resmî veya onaylı ürünü değildir.

@@ -1,6 +1,8 @@
 ---
 name: Bug report
 about: Reproducible software or documentation problem
+title: "[Bug] "
+labels: ["bug"]
 ---
 
 **Version and hardware**
