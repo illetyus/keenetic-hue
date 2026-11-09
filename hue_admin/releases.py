@@ -126,7 +126,9 @@ def build_release(files,destination,private_key,release_id,architecture,python_a
     try:
         with os.fdopen(fd,'wb') as output:
             with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr('manifest.json',canonical(manifest))
+                manifest_info=zipfile.ZipInfo('manifest.json');manifest_info.compress_type=zipfile.ZIP_DEFLATED
+                manifest_info.external_attr=(stat.S_IFREG|0o600)<<16
+                archive.writestr(manifest_info,canonical(manifest))
                 for name,data in files.items():
                     info=zipfile.ZipInfo(name);info.compress_type=zipfile.ZIP_DEFLATED
                     info.external_attr=(stat.S_IFREG|entries[name]['mode'])<<16

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from deploy import build_release
 from deploy.build_release import collect
 
 
@@ -66,3 +67,17 @@ class BuildReleaseTests(unittest.TestCase):
             (Path(root)/'deploy/huectl').write_bytes(b'#!/bin/sh\r\nexit 0\r\n')
             with patch('deploy.build_release.ROOT',Path(root)):files,_=collect(binary)
             self.assertEqual(files['service/huectl'],b'#!/bin/sh\nexit 0\n')
+
+    def test_rejects_unlisted_python_module_in_package_dir(self):
+        with tempfile.TemporaryDirectory() as root:
+            binary=self.fixture(root)
+            (Path(root)/'hue_agent'/'scratch_debug.py').write_text('x=1\n',encoding='utf-8')
+            with patch.object(build_release,'ROOT',Path(root)):
+                with self.assertRaisesRegex(ValueError,'BUILD_UNLISTED_SOURCE'):
+                    collect(binary)
+
+    def test_package_module_allowlist_matches_repository_sources(self):
+        self.assertTrue(hasattr(build_release,'PACKAGE_MODULES'))
+        for package,allowed in build_release.PACKAGE_MODULES.items():
+            actual={path.name for path in (build_release.ROOT/package).glob('*.py')}
+            self.assertEqual(actual,set(allowed))

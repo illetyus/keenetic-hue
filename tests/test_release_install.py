@@ -90,3 +90,11 @@ class ReleaseTests(unittest.TestCase):
             with patch('hue_admin.releases.os.fsync',side_effect=OSError('disk full')):
                 with self.assertRaises(OSError):extract_release(release,target)
             self.assertFalse(target.exists());self.assertEqual(path.read_bytes(),before)
+
+    def test_build_release_writes_deterministic_manifest_zip_metadata(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=self.build(root)
+            with zipfile.ZipFile(path) as archive:
+                manifest_info=archive.getinfo('manifest.json')
+                self.assertEqual(manifest_info.date_time,(1980,1,1,0,0,0))
+                self.assertEqual((manifest_info.external_attr>>16)&0o777,0o600)
