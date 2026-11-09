@@ -24,6 +24,32 @@ from hue_admin.releases import build_release
 from hue_admin.snapshot import read_private_bytes
 
 
+PACKAGE_MODULES={
+    'hue_agent':(
+        '__init__.py','__main__.py','agent.py','bumble_io.py','cloud_link.py','events.py',
+        'journal.py','lamp.py','local_api.py','private_files.py','protocol.py','tunnel_api.py',
+    ),
+    'hue_admin':(
+        '__init__.py','__main__.py','acceptance_entry.py','acceptance_journal.py',
+        'acceptance_launcher.py','acceptance_recovery.py','acceptance_startup.py',
+        'acceptance_watchdog.py','account_store.py','activation.py','admission.py',
+        'agent_runtime.py','agent_snapshot.py','agent_storage.py','archive_commands.py',
+        'backup.py','bootstrap.py','bootstrap_install.py','child_identity.py','cli.py',
+        'configure_issuer.py','controlled_acceptance.py','health.py','initialize_restore.py',
+        'installation.py','inventory.py','kernel_authorization.py','kernel_controller.py',
+        'kernel_managed.py','kernel_policy.py','kernel_receipt.py','kernel_sysctl.py',
+        'kernel_transaction.py','lifecycle_events.py','manifest.py','migration.py',
+        'owned_command.py','paths.py','platform.py','privileges.py','ram_closure.py',
+        'release_commands.py','releases.py','resources.py','restore.py','restore_current.py',
+        'restore_transaction.py','runtime_policy.py','runtime_repair.py','service_accounts.py',
+        'service_manager.py','setup_code.py','snapshot.py','storage_acceptance.py',
+        'storage_adapter.py','storage_check.py','storage_commands.py','storage_journal.py',
+        'storage_live.py','storage_maintenance.py','storage_operation.py','storage_owner.py',
+        'storage_session.py','unified_health.py','usb_permissions.py','usb_policy.py',
+    ),
+}
+
+
 def guard_private_path(path,windows=None):
     path=Path(path).absolute()
     if path.is_symlink() or any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in path.parents):
@@ -44,8 +70,10 @@ def collect(tunnel_binary):
     lock=json.loads((ROOT/'requirements-router.lock.json').read_text(encoding='utf-8'))
     files={}
     for package,prefix in (('hue_agent','agent'),('hue_admin','manager')):
+        allowed=set(PACKAGE_MODULES[package])
         for path in sorted((ROOT/package).glob('*.py')):
             if path.is_symlink():raise ValueError('BUILD_SOURCE_SYMLINK')
+            if path.name not in allowed:raise ValueError('BUILD_UNLISTED_SOURCE')
             files[f'{prefix}/{package}/{path.name}']=path.read_text(encoding='utf-8').encode('utf-8')
     # Bootstrap and service files remain explicit, never a recursive deploy/ copy.
     names=('huectl','S97keenetic-hue','hue-supervise.sh','component-child.py','hue-usb-event','acceptance-entry.py')

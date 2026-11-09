@@ -3,6 +3,7 @@ import json
 import time
 import unittest
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 from hue_agent.cloud_link import CloudLink, validate_url
@@ -125,7 +126,7 @@ class CloudLinkTests(unittest.IsolatedAsyncioTestCase):
             if len(pauses)==3:self.link.stopped.set();return True
             raise TimeoutError()
         self.link.config={'url':'wss://relay.example/agent','token_file':'test-only'}
-        with patch.dict(sys.modules,{'websockets.asyncio.client':module}), patch.object(self.link,'session',session), patch('hue_agent.cloud_link.Path.stat',return_value=SimpleNamespace(st_mode=0o100600)), patch('hue_agent.cloud_link.Path.read_text',return_value='a'*64), patch('hue_agent.cloud_link.random.uniform',side_effect=lambda lower,upper:upper), patch('hue_agent.cloud_link.asyncio.wait_for',side_effect=wait):
+        with patch.dict(sys.modules,{'websockets.asyncio.client':module}), patch.object(self.link,'session',session), patch('hue_agent.cloud_link.private_file',return_value=Path('test-only')), patch('hue_agent.cloud_link.Path.read_text',return_value='a'*64), patch('hue_agent.cloud_link.random.uniform',side_effect=lambda lower,upper:upper), patch('hue_agent.cloud_link.asyncio.wait_for',side_effect=wait):
             await self.link.run()
         self.assertEqual(pauses,[1,2,1])
 
@@ -133,3 +134,13 @@ class CloudLinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validate_url('wss://relay.example/agent'),'wss://relay.example/agent')
         for url in ('ws://relay.example/agent','wss://u:p@relay.example/agent','wss://relay.example/agent?token=secret','wss://relay.example/agent#x'):
             with self.assertRaises(ValueError):validate_url(url)
+
+    async def test_run_validates_token_file_with_private_file(self):
+        emitted = []
+        self.link.config = {'url': 'wss://relay.example/agent', 'token_file': 'token-symlink'}
+        with patch('hue_agent.cloud_link.private_file', side_effect=ValueError('PRIVATE_FILE_SYMLINK')) as mock_priv, \
+             patch('hue_agent.cloud_link.emit', side_effect=lambda name, **kw: (emitted.append((name, kw)), self.link.stopped.set())):
+            await self.link.run()
+        mock_priv.assert_called_once_with('token-symlink')
+        self.assertEqual(emitted[0][0], 'cloud_retry')
+        self.assertEqual(emitted[0][1]['errorType'], 'ValueError')

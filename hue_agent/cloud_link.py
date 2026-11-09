@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .events import emit
+from .private_files import private_file
 from .protocol import Command, ExecutionContext
 
 HEARTBEAT_SECONDS = 30
@@ -153,10 +154,8 @@ class CloudLink:
         while not self.stopped.is_set():
             try:
                 url = validate_url(self.config['url'])
-                path = Path(self.config['token_file'])
-                if path.stat().st_mode & 0o077:
-                    raise ValueError('PRIVATE_FILE_PERMISSIONS_REQUIRED')
-                token = path.read_text().strip()
+                path = private_file(self.config['token_file'])
+                token = path.read_text(encoding='utf-8').strip()
                 if len(token) < 32 or len(token) > 256 or not token.isascii() or any(c.isspace() for c in token):
                     raise ValueError('INVALID_CLOUD_TOKEN')
                 # Lazy import: local-only installations need no websocket package.
