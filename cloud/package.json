@@ -9,10 +9,10 @@
     "dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.5.1",
-    "@cloudflare/workers-types": "5.20261104.1",
+    "@cloudflare/vitest-plugin": "1.6.0",
+    "@cloudflare/workers-types": "5.20261106.1",
     "typescript": "7.0.2",
     "vitest": "4.1.12",
-    "wrangler": "4.157.0"
+    "wrangler": "4.158.0"
   }
 }
