@@ -29,7 +29,7 @@ def _recovery_parent(path):
     fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY)
     try:
         for part in path.parts[1:]:
-            child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+            child=os.open(part,os.O_RDONLY|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0),dir_fd=fd)
             os.close(fd);fd=child
         return fd
     except BaseException:
@@ -38,7 +38,7 @@ def _recovery_parent(path):
 
 def _copy_recovery_file(fd,destination,limit):
     digest=hashlib.sha256();total=0
-    out=os.open(destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    out=os.open(destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
     try:
         os.lseek(fd,0,os.SEEK_SET)
         while True:
@@ -83,7 +83,7 @@ def preserve_agent_recovery(path,uid,gid,output_dir):
             yield None;return
         opened={}
         for label,name,limit in (('main',path.name,MAX_AGENT_FILE),('journal',path.name+'-journal',MAX_RECOVERY_JOURNAL)):
-            try:fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+            try:fd=os.open(name,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0),dir_fd=parent)
             except OSError:raise ValueError('AGENT_RECOVERY_FILE') from None
             stack.callback(os.close,fd);info=os.fstat(fd)
             if (not stat.S_ISREG(info.st_mode) or info.st_uid!=uid or info.st_gid!=gid
@@ -113,7 +113,7 @@ def preserve_agent_recovery(path,uid,gid,output_dir):
         sync_directory(archive);sync_directory(output_dir)
         descriptors=[]
         for leaf in ('database.sqlite','database.sqlite-journal'):
-            fd=os.open(archive/leaf,os.O_RDONLY|os.O_NOFOLLOW)
+            fd=os.open(archive/leaf,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
             stack.callback(os.close,fd);descriptors.append(fd)
         expected['backup_fds']=descriptors
         yield expected

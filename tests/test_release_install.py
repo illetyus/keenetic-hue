@@ -39,7 +39,7 @@ class ReleaseTests(unittest.TestCase):
                 with self.subTest(kwargs=kwargs),self.assertRaises(ValueError):self.verify(path,**kwargs)
 
     def test_unsafe_names_never_built(self):
-        for name in ('../escape','/agent/file','agent/../escape','agent\\escape','config/token','secrets/bond.json','agent/file:ads','agent/file\x00extra','agent/.env','agent/api.token','agent/CON'):
+        for name in ('../escape','/agent/file','agent/../escape','agent\\escape','config/token','secrets/bond.json','metadata/bond.json','agent/file:ads','agent/file\x00extra','agent/.env','agent/api.token','agent/CON'):
             with self.subTest(name=name),tempfile.TemporaryDirectory() as root,self.assertRaises(ValueError):
                 self.build(root,{name:b'data'})
 

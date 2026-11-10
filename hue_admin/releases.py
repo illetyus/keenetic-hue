@@ -65,7 +65,7 @@ def release_name(name):
     if (len(parts)<2 or parts[0] not in ROOTS
             or any(p in ('.','..') or not re.fullmatch('[A-Za-z0-9_.-]+',p) for p in parts)
             or any(p.endswith('.') or p.split('.')[0].upper() in reserved for p in parts)
-            or any(p.lower() in ('.git','__pycache__','config.json','device.json','keystore.json')
+            or any(p.lower() in ('.git','__pycache__','config.json','device.json','keystore.json','bond.json')
                    or p.lower().startswith('.env') or p.lower().endswith(('.token','.pem','.sqlite','.pyc')) for p in parts)):
         raise ValueError('RELEASE_PATH')
     return name

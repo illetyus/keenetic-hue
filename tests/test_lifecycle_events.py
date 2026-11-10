@@ -36,6 +36,13 @@ class SafeLifecycleTests(unittest.TestCase):
             run.assert_called_once_with('agent','start')
             self.assertTrue(any(call.args[1:3]==('tunnel','dependency_blocked') for call in emit.call_args_list))
 
+    def test_emit_and_last_failure_never_raise_attribute_error_on_missing_onofollow(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # On platforms where os.O_NOFOLLOW is absent (like Windows), emit returns False and last_failure returns None
+            self.assertFalse(events.emit(root, 'agent', 'operation_failed', 'checkpoint', 'TEST_FAIL'))
+            self.assertIsNone(events.last_failure(root, 'agent'))
+
 
 @unittest.skipUnless(os.name=='posix' and hasattr(os,'geteuid') and os.geteuid()==0,'Native root log boundary')
 class LifecycleStorageTests(unittest.TestCase):

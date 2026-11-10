@@ -31,9 +31,10 @@ def check(root):
         count+=1;name=relative.as_posix()
         if path.is_symlink():errors.append({'path':name,'code':'SYMLINK'});continue
         if (path.name.startswith('.env') or path.name.startswith('.storage-ram.local.')
-                or path.suffix in ('.huebak','.huerel','.log','.key')
-                or path.name in ('wrangler.personal.jsonc','wrangler.tunnel.jsonc')
-                or 'credentials' in relative.parts or path.name=='keystore.json'):
+                or path.name.startswith('.dev.vars')
+                or path.suffix in ('.huebak','.huerel','.log','.key','.token','.pem','.crt','.sqlite','.db')
+                or path.name in ('wrangler.personal.jsonc','wrangler.tunnel.jsonc','bond.json','device.json','keystore.json')
+                or any(p in ('credentials','secrets') for p in relative.parts)):
             errors.append({'path':name,'code':'PRIVATE_OR_BINARY_ARTIFACT'})
         try:text=path.read_text(encoding='utf-8')
         except (UnicodeError,OSError):continue

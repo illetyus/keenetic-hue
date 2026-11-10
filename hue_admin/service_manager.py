@@ -199,7 +199,7 @@ def tunnel_arguments(root):
 @contextmanager
 def file_lock(path,wait=0):
     import fcntl
-    fd=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+    fd=os.open(path,os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK,0o600)
     try:
         info=os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_mode&0o077:raise ValueError('OWNER_LOCK_FILE')

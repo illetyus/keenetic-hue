@@ -63,7 +63,7 @@ def _private_directory(path):
 
 def _read(path):
     if path.is_symlink() or any(p.is_symlink() for p in path.parents):raise ValueError()
-    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK)
     try:
         info=os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600 or info.st_size>4096:raise ValueError()
@@ -89,20 +89,20 @@ def emit(root,component,event,stage,reason,*,owner=None,release_id=None,attempt=
         if release_id is not None:value['releaseId']=release_id
         if attempt is not None:value.update(attemptPid=attempt['pid'],attemptStartTicks=attempt['startTicks'])
         _validate(value);line=(json.dumps(value,separators=(',',':'))+'\n').encode()
-        lock=os.open(root/'run/lifecycle-log.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+        lock=os.open(root/'run/lifecycle-log.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK,0o600)
         try:
             info=os.fstat(lock)
             if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600:return False
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             log=root/'logs/lifecycle.log'
-            fd=os.open(log,os.O_APPEND|os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+            fd=os.open(log,os.O_APPEND|os.O_WRONLY|os.O_CREAT|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK,0o600)
             try:
                 info=os.fstat(fd)
                 if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600 or info.st_size>LOG_LIMIT:return False
                 if info.st_size+len(line)>LOG_LIMIT:
                     os.close(fd);fd=None
                     os.replace(log,log.with_suffix('.log.previous'))
-                    fd=os.open(log,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                    fd=os.open(log,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
                 view=memoryview(line)
                 while view:
                     count=os.write(fd,view)
@@ -115,7 +115,7 @@ def emit(root,component,event,stage,reason,*,owner=None,release_id=None,attempt=
                 atomic_replace(root/'run'/f'{component}-lifecycle.json',json.dumps(value).encode())
         finally:os.close(lock)
         return True
-    except (OSError,ValueError,TypeError,KeyError,ImportError):return False
+    except (OSError,ValueError,TypeError,KeyError,ImportError,AttributeError):return False
 
 
 def last_failure(root,component):
@@ -123,7 +123,7 @@ def last_failure(root,component):
         if component not in ('agent','tunnel'):return None
         value=_read(Path(root)/'run'/f'{component}-lifecycle.json')
         if value['component']==component and value['bootId']==_boot() and value['event'] in ('operation_failed','dependency_blocked'):return value
-    except (OSError,ValueError,TypeError,KeyError):pass
+    except (OSError,ValueError,TypeError,KeyError,AttributeError):pass
     return None
 
 
