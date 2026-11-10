@@ -107,7 +107,8 @@ def _recover(root,key,runtime,stop,start):
         if before is None:
             (root/'active.json').unlink(missing_ok=True);sync_directory(root)
         else:atomic_replace(root/'active.json',json.dumps(before,sort_keys=True).encode())
-    if not start():raise RuntimeError('ACTIVATION_RECOVERY_START_FAILED')
+    if before is not None:
+        if not start():raise RuntimeError('ACTIVATION_RECOVERY_START_FAILED')
     value['phase']='rolled_back';save_receipt(root,value)
 
 

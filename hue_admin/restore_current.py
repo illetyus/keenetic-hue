@@ -82,6 +82,8 @@ def validate_files(files, identity):
         fd=os.open(path,os.O_CREAT|os.O_WRONLY|os.O_EXCL,0o600)
         with os.fdopen(fd,'wb') as out:out.write(files['state/commands.sqlite'])
         with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
+            db.execute('pragma trusted_schema=OFF')
+            db.execute('pragma query_only=ON')
             # Entware SQLite omits extension-loading support entirely.
             disable_extensions=getattr(db,'enable_load_extension',None)
             if disable_extensions is not None:disable_extensions(False)
@@ -90,6 +92,8 @@ def validate_files(files, identity):
             if db.execute('pragma quick_check').fetchone()!=('ok',):raise ValueError('RESTORE_DATABASE')
             schema=db.execute("select type,name,tbl_name,sql from sqlite_master order by type,name").fetchall()
             with closing(sqlite3.connect(Path(layout['journal']).as_uri()+'?mode=ro',uri=True,timeout=2)) as live:
+                live.execute('pragma trusted_schema=OFF')
+                live.execute('pragma query_only=ON')
                 if schema!=live.execute("select type,name,tbl_name,sql from sqlite_master order by type,name").fetchall():
                     raise ValueError('RESTORE_DATABASE_SCHEMA')
 

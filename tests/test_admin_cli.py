@@ -42,12 +42,21 @@ class AdminCliTests(unittest.TestCase):
         with patch('hue_admin.cli.sys.stdout.isatty',return_value=False),patch('hue_admin.cli.issue_code') as issue:
             self.assertEqual(main(['setup-code']),2)
             issue.assert_not_called()
+        with patch('hue_admin.cli.sys.stdout.isatty',return_value=True),patch('hue_admin.cli.sys.stdin.isatty',return_value=False),patch('hue_admin.cli.issue_code') as issue:
+            self.assertEqual(main(['setup-code']),2)
+            issue.assert_not_called()
 
     def test_setup_code_is_shown_only_after_explicit_terminal_command(self):
-        with patch('hue_admin.cli.sys.stdout',new_callable=io.StringIO) as out,patch('hue_admin.cli.issue_code',return_value={'code':'A'*26,'expiresIn':600}):
+        with patch('hue_admin.cli.sys.stdin.isatty',return_value=True),patch('hue_admin.cli.sys.stdout',new_callable=io.StringIO) as out,patch('hue_admin.cli.issue_code',return_value={'code':'A'*26,'expiresIn':600}):
             out.isatty=lambda:True
             self.assertEqual(main(['setup-code']),0)
             self.assertIn('A'*26,out.getvalue());self.assertIn('600',out.getvalue())
+
+    def test_backup_handles_keyboard_interrupt_without_traceback(self):
+        with patch('hue_admin.cli.sys.stdin.isatty',return_value=True),patch('hue_admin.cli.sys.stderr',new_callable=io.StringIO) as err,patch('hue_admin.cli.getpass',side_effect=KeyboardInterrupt):
+            err.isatty=lambda:True
+            self.assertEqual(main(['backup','/private/backup.huebak']),1)
+            self.assertIn('BACKUP_OR_RESTORE_FAILED',err.getvalue())
     def test_unknown_target_never_runs_a_service(self):
         with patch('hue_admin.cli.run_service') as run:
             with self.assertRaises(SystemExit):

@@ -39,7 +39,15 @@ def run_owned(command,*,timeout,cwd,pass_fds=(),env=None):
                     count+=len(data);digest.update(data);tail=(tail+data)[-8192:]
                     if count>OUTPUT_LIMIT:reason='COMMAND_OUTPUT_LIMIT';break
             result=os.waitid(os.P_PID,process.pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
-            if result is not None:break
+            if result is not None:
+                while not eof and count<=OUTPUT_LIMIT:
+                    if select.select([process.stdout],[],[],0)[0]:
+                        data=os.read(process.stdout.fileno(),65536)
+                        if not data:eof=True;break
+                        count+=len(data);digest.update(data);tail=(tail+data)[-8192:]
+                    else:break
+                if count>OUTPUT_LIMIT:reason='COMMAND_OUTPUT_LIMIT'
+                break
             if time.monotonic()>=deadline:reason='COMMAND_TIMEOUT';break
     finally:
         # Repeated cancellation must not interrupt stop confirmation. Keep

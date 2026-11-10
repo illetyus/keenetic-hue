@@ -98,3 +98,20 @@ class ReleaseTests(unittest.TestCase):
                 manifest_info=archive.getinfo('manifest.json')
                 self.assertEqual(manifest_info.date_time,(1980,1,1,0,0,0))
                 self.assertEqual((manifest_info.external_attr>>16)&0o777,0o600)
+
+    def test_prune_stale_stages_bounds_accumulation(self):
+        from hue_admin.installation import prune_stale_stages
+        with tempfile.TemporaryDirectory() as root:
+            releases = Path(root) / 'releases'
+            releases.mkdir()
+            import time
+            created = []
+            for i in range(5):
+                d = releases / f'.failed-{"0"*31}{i}'
+                d.mkdir()
+                time.sleep(0.01)
+                created.append(d)
+            prune_stale_stages(releases, keep=2)
+            remaining = sorted([p.name for p in releases.iterdir()])
+            self.assertEqual(len(remaining), 2)
+            self.assertEqual(remaining, [created[3].name, created[4].name])

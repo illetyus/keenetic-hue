@@ -28,3 +28,12 @@ class AdmissionTests(unittest.TestCase):
                 with patch('hue_admin.admission.already_managed',return_value=True),admit(root,['start'],timeout=0) as second:
                     self.assertFalse(second)
                 with admit(root,['health','--live'],timeout=0) as readonly:self.assertTrue(readonly)
+
+    def test_help_flags_bypass_admission_lock(self):
+        root = Path('/nonexistent/fixture')
+        with admit(root, ['-h'], timeout=0) as allowed_h:
+            self.assertTrue(allowed_h)
+        with admit(root, ['--help'], timeout=0) as allowed_help:
+            self.assertTrue(allowed_help)
+        with admit(root, ['install', '-h'], timeout=0) as allowed_subcmd:
+            self.assertTrue(allowed_subcmd)

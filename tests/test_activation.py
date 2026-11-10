@@ -70,3 +70,19 @@ class ActivationTests(unittest.TestCase):
             root,key,runtime=self.fixture(tmp)
             with self.assertRaises(RuntimeError):activate_candidate(root,'0.2.0',key,runtime,lambda:False,lambda:True,lambda:{})
             self.assertEqual(self.current(root),'0.1.0')
+
+    def test_fresh_install_activation_failure_recovers_without_deadlock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root,key,runtime=self.fixture(tmp)
+            (root/'active.json').unlink()
+            def cut(phase):
+                if phase=='started':raise PowerCut()
+            with self.assertRaises(PowerCut):
+                activate_candidate(root,'0.1.0',key,runtime,lambda:True,lambda:True,lambda:{'healthy':True,'releaseId':'0.1.0'},cut)
+            start_calls = []
+            res = recover_activation(root,key,runtime,lambda:True,lambda:start_calls.append(1) or True)
+            self.assertTrue(res.get('recoveryComplete'))
+            self.assertEqual(start_calls, [])
+            self.assertFalse((root/'active.json').exists())
+            receipt = json.loads((root/'state/activation.json').read_text())
+            self.assertEqual(receipt['phase'], 'rolled_back')

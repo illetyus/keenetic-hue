@@ -63,7 +63,7 @@ def _private_directory(path):
 
 def _read(path):
     if path.is_symlink() or any(p.is_symlink() for p in path.parents):raise ValueError()
-    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK)
+    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0))
     try:
         info=os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600 or info.st_size>4096:raise ValueError()
@@ -89,13 +89,13 @@ def emit(root,component,event,stage,reason,*,owner=None,release_id=None,attempt=
         if release_id is not None:value['releaseId']=release_id
         if attempt is not None:value.update(attemptPid=attempt['pid'],attemptStartTicks=attempt['startTicks'])
         _validate(value);line=(json.dumps(value,separators=(',',':'))+'\n').encode()
-        lock=os.open(root/'run/lifecycle-log.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK,0o600)
+        lock=os.open(root/'run/lifecycle-log.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0),0o600)
         try:
             info=os.fstat(lock)
             if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600:return False
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             log=root/'logs/lifecycle.log'
-            fd=os.open(log,os.O_APPEND|os.O_WRONLY|os.O_CREAT|getattr(os,'O_NOFOLLOW',0)|os.O_NONBLOCK,0o600)
+            fd=os.open(log,os.O_APPEND|os.O_WRONLY|os.O_CREAT|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0),0o600)
             try:
                 info=os.fstat(fd)
                 if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1 or stat.S_IMODE(info.st_mode)!=0o600 or info.st_size>LOG_LIMIT:return False
@@ -138,7 +138,7 @@ def unavailable_reason(root,component,owner,selected):
                     and all(terminal[k]==owner[k] for k in ('bootId','pid','startTicks','releaseId'))
                     and (not failure or terminal['bootId']==failure['bootId'] and terminal['monotonic']>=failure['monotonic'])):
                 return 'SUPERVISOR_'+(terminal['signal'] if terminal.get('signal') else 'EXIT_RECORDED')
-        except (OSError,ValueError,TypeError,KeyError):pass
+        except (OSError,ValueError,TypeError,KeyError,AttributeError):pass
         if (failure and failure['stage']=='owner_wait' and failure['bootId']==owner['bootId']
                 and failure.get('attemptPid')==owner['pid'] and failure.get('attemptStartTicks')==owner['startTicks']):failure=None
     if failure and (failure.get('releaseId') in (None,selected)):
@@ -151,5 +151,5 @@ def unavailable_reason(root,component,owner,selected):
         terminal=_read(Path(root)/'run'/f'{component}-terminal.json')
         if terminal['component']==component and terminal['event']=='supervisor_exit' and all(terminal[k]==owner[k] for k in ('bootId','pid','startTicks','releaseId')):
             return 'SUPERVISOR_'+(terminal['signal'] if terminal.get('signal') else 'EXIT_RECORDED')
-    except (OSError,ValueError,TypeError,KeyError):pass
+    except (OSError,ValueError,TypeError,KeyError,AttributeError):pass
     return 'SUPERVISOR_EXIT_UNKNOWN'

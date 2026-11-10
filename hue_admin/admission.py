@@ -39,7 +39,7 @@ def already_managed(root,argv):
 @contextmanager
 def admit(root,argv,timeout=45):
     root=Path(root).absolute()
-    if argv and (argv[0] in ('status','health','diagnose') or '--help' in argv):
+    if argv and (argv[0] in ('status','health','diagnose') or '--help' in argv or '-h' in argv):
         yield True;return
     if already_managed(root,argv):yield False;return
     if root.is_symlink() or any(p.is_symlink() for p in root.parents):raise ValueError('MANAGER_PATH')

@@ -3,6 +3,8 @@ import base64
 import json
 import os
 import shutil
+import stat
+import sys
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
@@ -80,6 +82,9 @@ def stage_backup(raw, password, identity, target):
         raise ValueError('STAGING_EXISTS')
     if any(p.is_symlink() for p in target.parents):
         raise ValueError('STAGING_SYMLINK')
+    info = target.parent.stat()
+    if not stat.S_ISDIR(info.st_mode) or (sys.platform == 'linux' and (info.st_mode & 0o077 or (hasattr(os, 'geteuid') and os.geteuid() == 0 and info.st_uid != 0))):
+        raise ValueError('STAGING_PRIVATE_DIRECTORY_REQUIRED')
     # Parent must be owned by the administrator; staging is never in an untrusted shared directory.
     target.mkdir(mode=0o700)
     try:

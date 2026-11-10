@@ -199,11 +199,11 @@ def main(argv=None):
                 result=initialize_archive_action(args.file,password,args.release_id,args.dry_run)
             else:result=archive_action(args.action,args.file,password,getattr(args,'dry_run',False),recovery)
             print(json.dumps(result));return 0
-        except (OSError,ValueError,RuntimeError,GetPassWarning,EOFError):
+        except (OSError,ValueError,RuntimeError,GetPassWarning,EOFError,KeyboardInterrupt):
             print('BACKUP_OR_RESTORE_FAILED: no secret details logged; check private paths, password and recovery status',file=sys.stderr)
             return 1
     if args.action=='setup-code':
-        if not sys.stdout.isatty():
+        if not sys.stdout.isatty() or not sys.stdin.isatty():
             print('SETUP_CODE_REQUIRES_TERMINAL',file=sys.stderr)
             return 2
         try:

@@ -91,6 +91,17 @@ def installation_receipt(root):
     return value
 
 
+def prune_stale_stages(releases, keep=2):
+    try:
+        pattern=re.compile(r'^\.(failed|replaced|recovery-old)-[a-f0-9]{32}$')
+        stale=[entry for entry in releases.iterdir() if pattern.match(entry.name) and entry.is_dir() and not entry.is_symlink()]
+        if len(stale)>keep:
+            stale.sort(key=lambda p:p.stat().st_mtime)
+            for old in stale[:-keep]:
+                shutil.rmtree(old,ignore_errors=True)
+    except OSError:pass
+
+
 def install_candidate(release, root, mode, failpoint=lambda phase:None,stop_active=None):
     if mode not in ('fresh','repair'):raise ValueError('INSTALL_MODE')
     root=Path(root).absolute();private_directory(root)
@@ -139,7 +150,9 @@ def install_candidate(release, root, mode, failpoint=lambda phase:None,stop_acti
             if not isinstance(name,str) or not re.fullmatch(r'\.stage-[a-f0-9]{32}',name):raise ValueError('INSTALL_RECEIPT')
             old_stage=releases/name
             if old_stage.is_symlink():raise ValueError('INSTALL_SYMLINK')
-            if old_stage.exists():old_stage.rename(releases/('.failed-'+uuid.uuid4().hex))
+            if old_stage.exists():
+                old_stage.rename(releases/('.failed-'+uuid.uuid4().hex))
+                prune_stale_stages(releases)
         required=sum(entry['size'] for entry in manifest['files'].values())+4*1024*1024
         if shutil.disk_usage(root).free<required:raise ValueError('INSTALL_DISK_SPACE')
         stage=releases/('.stage-'+uuid.uuid4().hex)
@@ -156,6 +169,7 @@ def install_candidate(release, root, mode, failpoint=lambda phase:None,stop_acti
                 if not stop_active():raise RuntimeError('INSTALL_ACTIVE_STOP_FAILED')
                 record('stopped')
             target.rename(releases/('.replaced-'+uuid.uuid4().hex));sync_directory(releases);record('replaced')
+            prune_stale_stages(releases)
         stage.rename(target);sync_directory(releases);failpoint('promoted')
         record('committed')
         return {'releaseId':release_id,'activated':False,'alreadyVerified':False}
@@ -181,7 +195,9 @@ def recover_installation(root,key,runtime,stop):
             if not matching_slot(stage):
                 return {'recovered':False,'pending':True,'activeUnaffected':active is not None and active!=value['releaseId']}
             if active==value['releaseId'] and not stop():raise RuntimeError('INSTALL_RECOVERY_STOP_FAILED')
-            if target.exists():target.rename(releases/('.recovery-old-'+uuid.uuid4().hex))
+            if target.exists():
+                target.rename(releases/('.recovery-old-'+uuid.uuid4().hex))
+                prune_stale_stages(releases)
             stage.rename(target);sync_directory(releases)
         value['phase']='committed';atomic_replace(root/'state/installation.json',json.dumps(value,sort_keys=True).encode())
     return {'recovered':True,'pending':False}
