@@ -75,3 +75,42 @@ class BootstrapInstallTests(unittest.TestCase):
             with patch('hue_admin.account_store.ensure_accounts') as accounts:
                 provision_bootstrap(root,'0.2.0',key,runtime,cli,init)
                 accounts.assert_called_once_with(root)
+
+    def test_committed_prior_release_allows_changed_shim_and_cleans_stage_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp,patch('hue_admin.bootstrap_install.management_lock',return_value=nullcontext()):
+            root,key,runtime,cli,init=self.fixture(tmp)
+            provision_bootstrap(root,'0.2.0',key,runtime,cli,init)
+            self.assertEqual(list(root.glob('.bootstrap-stage-*')),[])
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+            signing=Ed25519PrivateKey.generate();pub=signing.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw)
+            (root/'config/release-trust.pub').write_bytes(pub)
+            source=Path(__file__).resolve().parents[1]
+            for ver,huectl_bytes in (('0.2.1',b'#!/bin/sh\necho v1\n'),('0.2.2',b'#!/bin/sh\necho v2\n')):
+                files={'manager/hue_admin/__init__.py':b'# fixture','manager/hue_admin/cli.py':ver.encode(),
+                       'manager/huectl-entry.py':b'# entry','service/huectl':huectl_bytes,
+                       'service/S97keenetic-hue':(source/'deploy/S97keenetic-hue').read_bytes()}
+                archive=Path(tmp)/f'{ver}.huerel';build_release(files,archive,signing,ver,*runtime)
+                install_candidate(verify_release(archive,pub,*runtime),root,'repair')
+            provision_bootstrap(root,'0.2.1',pub,runtime,cli,init,replace_entries=True)
+            self.assertEqual(cli.read_bytes(),b'#!/bin/sh\necho v1\n')
+            provision_bootstrap(root,'0.2.2',pub,runtime,cli,init,replace_entries=False)
+            self.assertEqual(cli.read_bytes(),b'#!/bin/sh\necho v2\n')
+            self.assertEqual(list(root.glob('.bootstrap-stage-*')),[])
+
+    def test_finish_if_needed_normalizes_relative_entry_paths(self):
+        import os
+        from hue_admin.bootstrap_install import finish_if_needed
+        with tempfile.TemporaryDirectory() as tmp,patch('hue_admin.bootstrap_install.management_lock',return_value=nullcontext()):
+            root,key,runtime,cli,init=self.fixture(tmp)
+            def cut(phase):
+                if phase=='cli_installed':raise PowerCut()
+            with self.assertRaises(PowerCut):provision_bootstrap(root,'0.2.0',key,runtime,cli,init,failpoint=cut)
+            old_cwd=os.getcwd()
+            try:
+                os.chdir(tmp)
+                with patch('hue_admin.release_commands.runtime_for',return_value=runtime):
+                    finish_if_needed(root,Path('entries/huectl'),Path('entries/S97keenetic-hue'))
+            finally:os.chdir(old_cwd)
+            self.assertTrue(init.exists())
+            self.assertEqual(list(root.glob('.bootstrap-stage-*')),[])

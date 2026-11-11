@@ -20,6 +20,7 @@ describe('relay failures do not become successful physical commands',()=>{
  it('rejects unknown fields and oversized control input',async()=>{
   expect((await control({...input(),expiresAt:1e100})).status).toBe(400);
   expect((await control({...input(),padding:'x'.repeat(5000)})).status).toBe(400);
+  expect((await call('/control',{method:'POST',headers:{Authorization:operator},body:new Uint8Array([0xff,0xfe])})).status).toBe(400);
  });
  it('connection replacement sends subsequent command only to the new session',async()=>{
   const first=await connect();const second=await connect();

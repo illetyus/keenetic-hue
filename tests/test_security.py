@@ -147,3 +147,54 @@ class InstallerSecurityTests(unittest.TestCase):
         (self.stage/'hue_agent/extra.py').write_text('# injected')
         with self.assertRaises(ValueError):
             self.installer.load_snapshot(self.stage, self.digest)
+
+    def test_huectl_entry_handles_keyboard_interrupt_with_exit_130(self):
+        import subprocess, sys
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'system'
+            pkg = root / 'manager/hue_admin'
+            pkg.mkdir(parents=True)
+            (pkg / '__init__.py').write_text('')
+            (pkg / 'admission.py').write_text(
+                'from contextlib import contextmanager\n@contextmanager\ndef admit(*a, **k): yield True\n')
+            (pkg / 'bootstrap.py').write_text('def run(*a, **k): raise KeyboardInterrupt()\n')
+            entry = root / 'manager/huectl-entry.py'
+            entry.write_text((Path(__file__).parents[1] / 'deploy/huectl-entry.py').read_text())
+            proc = subprocess.run([sys.executable, '-I', str(entry), 'status'], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 130)
+            self.assertNotIn('Traceback', proc.stderr)
+            self.assertIn('HUE_OPERATION_INTERRUPTED', proc.stderr)
+
+    def test_management_lock_rejects_non_private_mode(self):
+        import os, stat
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+        from hue_admin.restore_current import management_lock
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict('sys.modules', {'fcntl': MagicMock()}), \
+                 patch('hue_admin.restore_current.os.open', return_value=99), \
+                 patch('hue_admin.restore_current.os.close') as closer, \
+                 patch('hue_admin.restore_current.os.fstat', return_value=SimpleNamespace(st_mode=stat.S_IFREG | 0o644)):
+                with self.assertRaisesRegex(ValueError, 'MANAGEMENT_LOCK_FILE'):
+                    with management_lock(root):
+                        pass
+                closer.assert_called_once_with(99)
+
+    def test_backup_to_rejects_non_root_parent_on_linux_as_root(self):
+        import stat
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from hue_admin.archive_commands import backup_to
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'out.huebak'
+            real_stat = Path.stat
+            def fake_stat(p, *args, **kwargs):
+                if p == target.parent and kwargs.get('follow_symlinks', True):
+                    return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=1000)
+                return real_stat(p, *args, **kwargs)
+            with patch('hue_admin.archive_commands.sys.platform', 'linux'), \
+                 patch('os.geteuid', return_value=0, create=True), \
+                 patch.object(Path, 'stat', fake_stat):
+                with self.assertRaisesRegex(ValueError, 'BACKUP_PRIVATE_DIRECTORY_REQUIRED'):
+                    backup_to(target, 'a-valid-long-password-1234')

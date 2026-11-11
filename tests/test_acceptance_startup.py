@@ -20,6 +20,23 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(bootstrap.run(root,['start']),0)
         self.assertEqual(events,['recover','select'])
 
+    def test_bootstrap_skips_startup_recovery_for_help_flags(self):
+        from hue_admin import bootstrap
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'active.json').touch()
+            for argv in (['start','-h'],['install','--help'],['internal-service','start','-h'],[]):
+                with self.subTest(argv=argv), \
+                     patch('hue_admin.acceptance_startup.recover_before_start') as recover, \
+                     patch.object(bootstrap,'selected_manager',return_value=root), \
+                     patch.object(bootstrap.importlib,'import_module',return_value=Mock(main=lambda _:0)):
+                    self.assertEqual(bootstrap.run(root,argv),0)
+                    recover.assert_not_called()
+            with patch('hue_admin.acceptance_startup.recover_before_start') as recover, \
+                 patch.object(bootstrap,'selected_manager',return_value=root), \
+                 patch.object(bootstrap.importlib,'import_module',return_value=Mock(main=lambda _:0)):
+                self.assertEqual(bootstrap.run(root,['start','--','-h']),0)
+                recover.assert_called_once_with(root)
+
     def test_pending_journal_prevents_already_managed_start_shortcut(self):
         from hue_admin.admission import already_managed
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:

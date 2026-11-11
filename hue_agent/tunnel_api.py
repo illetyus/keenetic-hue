@@ -20,8 +20,9 @@ class TunnelController:
             if not 1 <= command.sequence <= 2**53-1 or command.expires_at > time.time()+6:
                 raise ProtocolError('INVALID_COMMAND')
         except ProtocolError as error:
-            return {'commandId':data.get('commandId') if isinstance(data,dict) else None,
-                    'status':'error','errorCode':error.code}
+            cid=data.get('commandId') if isinstance(data,dict) else None
+            command_id=cid if isinstance(cid,str) and 1<=len(cid)<=128 else None
+            return {'commandId':command_id,'status':'error','errorCode':error.code}
         return await self.original.execute(data, context=self.context)
 
 

@@ -40,6 +40,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(observed_state(False, 178)['brightness'], 0)
         self.assertEqual(observed_state(False, 178)['brightnessRaw'], 178)
 
+    def test_negative_huge_expiry_rejected_even_with_allow_expired(self):
+        with self.assertRaisesRegex(ProtocolError, 'INVALID_EXPIRY'):
+            Command.parse(payload(expiresAt=-10**1000), 'session1', allow_expired=True)
+
 
 class JournalTests(unittest.TestCase):
     def test_replay_conflict_order_and_crash_survive_restart(self):
@@ -149,6 +153,20 @@ class LampTests(unittest.IsolatedAsyncioTestCase):
         io.values[POWER] = b'\x02'
         with self.assertRaises(ValueError):
             await Lamp(io).read_state(time.monotonic()+1)
+
+    async def test_set_raw_final_poll_respects_three_second_until_window(self):
+        io = FakeIo()
+        lamp = Lamp(io, poll_interval=0)
+        seen = []
+        orig_read_state = lamp.read_state
+        async def tracked_read_state(deadline):
+            seen.append(deadline)
+            return await orig_read_state(deadline)
+        lamp.read_state = tracked_read_state
+        start = time.monotonic()
+        await lamp.set_raw(on=False, deadline=start+10)
+        self.assertGreaterEqual(len(seen), 2)
+        self.assertLessEqual(seen[-1], time.monotonic()+3.1)
 
 
 if __name__ == '__main__':

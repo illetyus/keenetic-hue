@@ -36,6 +36,7 @@ def status(live=False,root=manager.SYSTEM):
                 if not 32<=len(token)<=256 or any(c.isspace() for c in token):raise ValueError('API_TOKEN')
                 return token
             pid=manager.child_pid('agent',root);record=manager.owner_record('agent',root)
+            if not pid or not record:raise ValueError('AGENT_OWNER')
             from .runtime_policy import release_policy
             socket_path=root/'run/health.sock';identity_options={}
             if release_policy(root,record['releaseId'])['agent']=='dedicated':
@@ -46,13 +47,16 @@ def status(live=False,root=manager.SYSTEM):
                 identity_options={'expected_uid':identity['uid'],'expected_gid':identity['gid']}
             code,value=authenticated_probe(8787,'/v1/state',token_loader,pid,socket_path,
                 lambda:manager.child_owned('agent',root,record,pid),**identity_options)
+            if not isinstance(value,dict):raise ValueError('INVALID_API_RESPONSE')
             api=code in (200,503)
             ble=code==200 and value.get('status')=='verified'
             components['localApi']=item('ready' if api else 'degraded','API_RESPONSE' if api else 'API_DENIED')
             components['ble']=item('ready' if ble else 'degraded','VERIFIED' if ble else 'BLE_UNAVAILABLE')
             physical=api and ble
-        except (OSError,ValueError,http.client.HTTPException):
-            components['localApi']=item('degraded','LOCAL_CHECK_FAILED');physical=False
+        except (OSError,ValueError,TypeError,AttributeError,http.client.HTTPException):
+            components['localApi']=item('degraded','LOCAL_CHECK_FAILED')
+            components['ble']=item('unknown','LOCAL_CHECK_FAILED')
+            physical=False
         try:
             code,_=probe(18790,'/ready')
             ready=code==200 and owned['tunnel']
@@ -72,5 +76,10 @@ def status(live=False,root=manager.SYSTEM):
                 expected[component]={'expectedUid':identity['uid'],'expectedGid':identity['gid']}
             principals=expected
         except (OSError,ValueError,KeyError,TypeError):pass
+    bootstrap={'bootstrapReleaseId':None,'bootstrapInSync':False}
+    try:
+        from .bootstrap_install import bootstrap_sync_status
+        bootstrap=bootstrap_sync_status(root,selected)
+    except (OSError,ValueError,KeyError,TypeError):pass
     return {'schemaVersion':1,'healthy':version_ok and physical,'releaseId':selected if version_ok else None,
-            'components':components,'principals':principals}
+            **bootstrap,'components':components,'principals':principals}

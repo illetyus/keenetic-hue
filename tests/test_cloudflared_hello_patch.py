@@ -8,7 +8,7 @@ from tools import patch_cloudflared_hello_cert
 
 
 class CloudflaredHelloPatchTests(unittest.TestCase):
-    EXPECTED_PATCHED_SOURCE_SHA256='e5762ae1904b95137c85ce0f0fa491e871385c7c2a1984b34f465a92cf1a748d'
+    EXPECTED_PATCHED_SOURCE_SHA256='a043272f37bf95b64f334106f9289ff08d5481e8094135721108eebd31a72012'
 
     def fixture(self, root, content=b'upstream fixture'):
         root=Path(root)
@@ -31,6 +31,8 @@ class CloudflaredHelloPatchTests(unittest.TestCase):
             self.assertEqual(result['patchedSha256'],self.EXPECTED_PATCHED_SOURCE_SHA256)
             self.assertNotIn(b'PRIVATE KEY',patched)
             self.assertNotIn(b'helloKey',patched)
+            self.assertIn(b'"math/big"',patched)
+            self.assertIn(b'SerialNumber:',patched)
             self.assertIn(b'func GetHelloCertificate()',patched)
 
     def test_refuses_an_unexpected_upstream_source_without_editing_it(self):

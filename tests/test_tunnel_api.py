@@ -59,3 +59,8 @@ class TunnelApiTests(unittest.IsolatedAsyncioTestCase):
         response=await get('Authorization: Bearer '+'x'*64+'\r\n')
         self.assertIn(b'200 OK',response)
         self.assertIn(self.api.context.session_id.encode(),response)
+    async def test_oversized_or_non_string_command_id_is_not_echoed_on_parse_error(self):
+        for bad in (123, 'x'*200):
+            result=await self.api.controller.execute(payload(commandId=bad,sessionId=self.api.context.session_id))
+            self.assertIsNone(result['commandId'])
+            self.assertEqual(result['errorCode'],'INVALID_COMMAND')

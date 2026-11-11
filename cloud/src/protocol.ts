@@ -28,11 +28,12 @@ export function wireCommand(input:ControlInput,sessionId:string,sequence:number,
 export function logicalKey(input:ControlInput):string{
   return JSON.stringify([input.deviceId,input.operation,input.on??null,input.brightness??null]);
 }
-export function verifiedResult(value:unknown,id:string):Result{
+export function verifiedResult(value:unknown,id:string,maxAgeSeconds=10):Result{
   const d=object(value,['commandId','status','errorCode','deviceId','on','brightness','brightnessRaw','observedAt'],['commandId','status']);
   if(d.commandId!==id)throw new ProtocolError('INVALID_RESULT');
   if(d.status==='verified'){
-    if(d.deviceId!==DEVICE_ID||typeof d.on!=='boolean'||!Number.isInteger(d.brightness)||d.brightness<0||d.brightness>100||!Number.isInteger(d.brightnessRaw)||d.brightnessRaw<0||d.brightnessRaw>254||typeof d.observedAt!=='number'||!Number.isFinite(d.observedAt)||Math.abs(Date.now()/1000-d.observedAt)>10||Object.hasOwn(d,'errorCode'))throw new ProtocolError('INVALID_RESULT');
+    const now=Date.now()/1000;
+    if(d.deviceId!==DEVICE_ID||typeof d.on!=='boolean'||!Number.isInteger(d.brightness)||d.brightness<0||d.brightness>100||!Number.isInteger(d.brightnessRaw)||d.brightnessRaw<0||d.brightnessRaw>254||typeof d.observedAt!=='number'||!Number.isFinite(d.observedAt)||d.observedAt>now+10||now-d.observedAt>maxAgeSeconds||Object.hasOwn(d,'errorCode'))throw new ProtocolError('INVALID_RESULT');
     if(!d.on&&d.brightness!==0)throw new ProtocolError('INVALID_RESULT');
     if(d.on&&d.brightness!==Math.round(d.brightnessRaw*100/254))throw new ProtocolError('INVALID_RESULT');
   }else if(!['offline','expired','error'].includes(d.status)||typeof d.errorCode!=='string'||!/^[A-Z_]{1,64}$/.test(d.errorCode)||Object.keys(d).some(k=>!['commandId','status','errorCode'].includes(k)))throw new ProtocolError('INVALID_RESULT');

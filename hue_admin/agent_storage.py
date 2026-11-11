@@ -10,6 +10,7 @@ import stat
 from contextlib import contextmanager, ExitStack
 import hashlib
 import json
+import re
 import shutil
 import tempfile
 
@@ -57,6 +58,20 @@ def _copy_recovery_file(fd,destination,limit):
     return digest.hexdigest()
 
 
+def prune_recovery_archives(output_dir,keep=2,*,exclude=None):
+    try:
+        pattern=re.compile(r'^sqlite-recovery-[A-Za-z0-9_]+$')
+        archives=[entry for entry in Path(output_dir).iterdir()
+                  if entry.name!=exclude and pattern.match(entry.name)
+                  and entry.is_dir() and not entry.is_symlink()]
+        limit=max(0,keep-1 if exclude is not None else keep)
+        if len(archives)>limit:
+            archives.sort(key=lambda p:p.stat().st_mtime)
+            for old in archives[:len(archives)-limit]:
+                shutil.rmtree(old,ignore_errors=True)
+    except OSError:pass
+
+
 @contextmanager
 def preserve_agent_recovery(path,uid,gid,output_dir):
     """Preserve opaque bytes before the UID worker may recover a stopped DB.
@@ -97,6 +112,7 @@ def preserve_agent_recovery(path,uid,gid,output_dir):
         required=2*sum(item[3][2] for item in opened.values())+2*MAX_AGENT_FILE+65536
         if shutil.disk_usage(output_dir).free<required:raise ValueError('AGENT_RECOVERY_SPACE')
         archive=Path(tempfile.mkdtemp(prefix='sqlite-recovery-',dir=output_dir))
+        prune_recovery_archives(output_dir,keep=2,exclude=archive.name)
         expected={}
         for label,(fd,name,limit,before) in opened.items():
             saved=archive/('database.sqlite'+('-journal' if label=='journal' else ''))

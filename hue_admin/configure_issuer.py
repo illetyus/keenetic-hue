@@ -1,5 +1,6 @@
 """Provision only the narrow setup-code authority; no Cloudflare admin key."""
 import json
+import os
 import re
 import stat
 import sys
@@ -14,15 +15,20 @@ from .snapshot import read_private_bytes
 def configure_issuer(origin, token, root=SYSTEM):
     if not isinstance(token,str) or not re.fullmatch('[a-f0-9]{64}',token):
         raise ValueError('INVALID_ISSUER')
-    with management_lock():
+    with management_lock(root):
         request_setup_code(origin,token)  # Discard the code; verifies exact HTTPS origin + authority.
         root=Path(root).absolute()
         if root.is_symlink() or any(p.is_symlink() for p in root.parents):raise ValueError('ISSUER_PATH')
+        if sys.platform=='linux' and root.exists():
+            rinfo=root.stat()
+            if not stat.S_ISDIR(rinfo.st_mode) or rinfo.st_mode&0o077 or (hasattr(os,'geteuid') and os.geteuid()==0 and rinfo.st_uid!=0):
+                raise ValueError('ISSUER_PRIVATE_DIRECTORY')
         for name in ('config','secrets'):
             path=root/name
             if path.is_symlink():raise ValueError('ISSUER_PATH')
             path.mkdir(mode=0o700,exist_ok=True)
-            if not path.is_dir() or (sys.platform=='linux' and stat.S_IMODE(path.stat().st_mode)!=0o700):
+            info=path.stat()
+            if not stat.S_ISDIR(info.st_mode) or (sys.platform=='linux' and (stat.S_IMODE(info.st_mode)!=0o700 or (hasattr(os,'geteuid') and os.geteuid()==0 and info.st_uid!=0))):
                 raise ValueError('ISSUER_PRIVATE_DIRECTORY')
         targets={root/'secrets/setup-issuer.token':token.encode('ascii'),
                  root/'config/management.json':json.dumps({'publicOrigin':origin}).encode('utf-8')}

@@ -150,7 +150,12 @@ def execute(operation,archive=None,trust_file=None,trust_pin=None,boot_action=No
                 result['versionHealthVerified']=True
             return result
         selected=pointer(root)
+        from .bootstrap_install import bootstrap_sync_status
+        sync=bootstrap_sync_status(root,release_id)
         if selected and selected['releaseId']==release_id and result['alreadyVerified']:
             if not start() or not healthy_version(release_id)['healthy']:raise RuntimeError('UPDATE_CURRENT_HEALTH_FAILED')
-            return {'activated':False,'alreadyVerified':True,'releaseId':release_id,'versionHealthVerified':True}
-        return activate_candidate(root,release_id,key,runtime,stop,start,lambda:healthy_version(release_id))
+            return {'activated':False,'alreadyVerified':True,'releaseId':release_id,'versionHealthVerified':True,
+                    'bootstrapSyncRequired':not sync['bootstrapInSync'],'bootstrapReleaseId':sync['bootstrapReleaseId']}
+        outcome=activate_candidate(root,release_id,key,runtime,stop,start,lambda:healthy_version(release_id))
+        outcome.update(bootstrapSyncRequired=not sync['bootstrapInSync'],bootstrapReleaseId=sync['bootstrapReleaseId'])
+        return outcome

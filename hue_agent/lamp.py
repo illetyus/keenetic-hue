@@ -73,7 +73,12 @@ class Lamp:
         expected_raw = brightness_raw if brightness_raw is not None else initial['brightnessRaw']
         until = min(deadline, time.monotonic()+3)
         while True:
-            state = await self.read_state(deadline)
+            try:
+                state = await self.read_state(until)
+            except TimeoutError:
+                if time.monotonic() < deadline:
+                    raise RuntimeError('STATE_CHANGED_DURING_COMMAND') from None
+                raise
             if (on is None or state['on'] == on) and state['brightnessRaw'] == expected_raw:
                 return state
             if time.monotonic() >= until:

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from .admission import is_help_or_empty
 from .platform import runtime_for
 from .releases import verify_signed_manifest
 from .service_manager import private_bytes,selection
@@ -37,9 +38,11 @@ def selected_manager(root,runtime_probe=runtime_for):
 
 def run(root,argv):
     root=Path(root).absolute()
+    help_mode=is_help_or_empty(argv)
     # huectl-entry holds CLI admission here. Recover before choosing a manager:
     # recovery may restore the baseline selection after an interrupted test.
-    if (argv and argv[0] in ('start','restart','recover','install','repair','update','rollback')
+    if not help_mode and (
+            argv and argv[0] in ('start','restart','recover','install','repair','update','rollback')
             or argv[:2] in (['internal-service','start'],['internal-service','restart'])):
         from .acceptance_startup import recover_before_start
         recover_before_start(root)
@@ -49,8 +52,12 @@ def run(root,argv):
     if recovery:
         manager=root/'manager'
     elif (root/'active.json').exists() or (root/'active.json').is_symlink():
-        manager=selected_manager(root)
-    elif (root/'state/schema.json').exists():
+        if help_mode:
+            try:manager=selected_manager(root)
+            except (OSError,ValueError,KeyError,TypeError):manager=root/'manager'
+        else:
+            manager=selected_manager(root)
+    elif (root/'state/schema.json').exists() and not help_mode:
         raise ValueError('BOOTSTRAP_SELECTION_MISSING')
     else:
         manager=root/'manager'

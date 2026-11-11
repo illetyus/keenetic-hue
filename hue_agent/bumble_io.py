@@ -77,15 +77,30 @@ class BleIo:
         await self.peer.write_value(self.characteristics[uuid], data, with_response=True)
 
     async def close(self):
-        if self.connection is not None and not self.disconnected:
-            try:
-                await asyncio.wait_for(self.connection.disconnect(), 3)
-            except (Exception, asyncio.CancelledError):
-                pass
-        self.disconnected = True
-        self.connection = None
-        self.peer = None
-        self.characteristics = {}
-        if self.stack is not None:
-            stack, self.stack = self.stack, None
-            await asyncio.wait_for(stack.aclose(), 5)
+        cancelled = None
+        task = asyncio.current_task()
+        try:
+            if self.connection is not None and not self.disconnected:
+                try:
+                    await asyncio.wait_for(self.connection.disconnect(), 3)
+                except asyncio.CancelledError as error:
+                    if task is not None and task.cancelling():
+                        cancelled = error
+                except Exception:
+                    pass
+        finally:
+            self.disconnected = True
+            self.connection = None
+            self.peer = None
+            self.characteristics = {}
+            if self.stack is not None:
+                stack, self.stack = self.stack, None
+                try:
+                    await asyncio.wait_for(stack.aclose(), 5)
+                except asyncio.CancelledError as error:
+                    if task is not None and task.cancelling():
+                        cancelled = cancelled or error
+                except Exception:
+                    pass
+        if cancelled is not None:
+            raise cancelled

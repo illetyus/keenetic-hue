@@ -1,13 +1,17 @@
 import asyncio
 import importlib.util
 import json
+import logging
 from pathlib import Path
+import re
+import sqlite3
 import sys
 import tempfile
 from types import ModuleType
 import unittest
 from unittest.mock import patch
 
+from hue_agent.events import emit
 from hue_agent.local_api import LocalApi
 from hue_agent.journal import Journal
 from test_core import FakeIo
@@ -51,3 +55,55 @@ class OptionalCloudTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.gather(task,return_exceptions=True)
                         for instance in api:await instance.close()
                         for instance in journal:instance.close()
+
+    async def test_run_closes_journal_when_io_close_raises_and_on_invalid_token(self):
+        module_name='hue_agent._main_under_test_close'
+        spec=importlib.util.spec_from_file_location(module_name,Path(__file__).resolve().parents[1]/'hue_agent/__main__.py')
+        main=importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules,{'fcntl':ModuleType('fcntl')}):spec.loader.exec_module(main)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'api.token').write_text('short')
+            journals=[]
+            def make_journal(*args):
+                obj=Journal(*args);journals.append(obj);return obj
+            with patch.object(main,'private_file',side_effect=Path), patch.object(main,'Journal',side_effect=make_journal):
+                with self.assertRaisesRegex(ValueError,'INVALID_TOKEN_FILE'):
+                    await main.run({'journal':str(root/'journal.sqlite'),'token_file':str(root/'api.token'),'port':0})
+            self.assertEqual(journals,[])
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);token='test-local-token-'+'x'*40
+            (root/'api.token').write_text(token)
+            io=FakeIo();io.disconnected=False
+            async def connect():io.disconnected=False
+            async def close():raise TimeoutError('usb hang')
+            io.connect=connect;io.close=close
+            api=[];journal=[];callbacks=[]
+            def make_api(*args):
+                obj=LocalApi(*args);api.append(obj);return obj
+            def make_journal(*args):
+                obj=Journal(*args);journal.append(obj);return obj
+            loop=asyncio.get_running_loop()
+            with patch.object(main,'private_file',side_effect=Path), patch.object(main,'BleIo',return_value=io), patch.object(main,'LocalApi',side_effect=make_api), patch.object(main,'Journal',side_effect=make_journal), patch.object(loop,'add_signal_handler',side_effect=lambda sig,callback:callbacks.append(callback)):
+                task=asyncio.create_task(main.run({'journal':str(root/'journal.sqlite'),'token_file':str(root/'api.token'),'port':0}))
+                async with asyncio.timeout(1):
+                    while not api or api[0].server is None:await asyncio.sleep(0.001)
+                for callback in callbacks:callback()
+                await asyncio.gather(task,return_exceptions=True)
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    journal[0].db.execute('SELECT 1')
+
+    def test_configure_logging_adds_utc_timestamps(self):
+        module_name='hue_agent._main_under_test_log'
+        spec=importlib.util.spec_from_file_location(module_name,Path(__file__).resolve().parents[1]/'hue_agent/__main__.py')
+        main=importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules,{'fcntl':ModuleType('fcntl')}):spec.loader.exec_module(main)
+        with tempfile.TemporaryDirectory() as folder:
+            log=Path(folder)/'agent.log'
+            main.configure_logging(str(log))
+            try:
+                emit('ble_ready')
+                for handler in logging.getLogger().handlers:handler.flush()
+            finally:
+                logging.basicConfig(handlers=[],force=True)
+            line=log.read_text(encoding='utf-8').strip()
+            self.assertRegex(line,r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z WARNING:hue-agent:\{"event": "ble_ready"\}$')

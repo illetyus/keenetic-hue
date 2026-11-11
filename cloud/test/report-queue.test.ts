@@ -46,3 +46,49 @@ it('live-report check reads verified state without writing the device and compar
   offline=true;expect(await instance.checkReporting()).toMatchObject({reported:false,matched:false,errorCode:'DEVICE_UNAVAILABLE'});expect(reports).toBe(1);
  });
 });
+it('pollReport ignores transient Relay errors and preserves verified/offline parity',async()=>{
+ const a=((env as any).HUE_AUTH as DurableObjectNamespace<AuthStore>).getByName(crypto.randomUUID());
+ const setup=await a.issueSetup();if(!setup.ok)throw Error('setup');
+ const f=await a.createFlow({clientId:'client',redirectUri:'https://redirect.test',state:'x',csrf:'csrf'});if(!f.ok)throw Error('flow');
+ const c=await a.consent({flowId:f.value.flowId,csrf:'csrf',setupCode:setup.value.code});if(!c.ok)throw Error('consent');
+ const t=await a.exchange({grant_type:'authorization_code',client_id:'client',redirect_uri:'https://redirect.test',code:c.value.code});if(!t.ok)throw Error('token');
+ const identity=(await a.authenticate(t.value.access_token))!;
+ await runInDurableObject(a,async(instance:any,state)=>{
+  instance.env.REPORT_STATE_ENABLED='true';instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';
+  let nextResponse:(id:string)=>Response=()=>Response.json({status:'error',errorCode:'BUSY'},{status:503});
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(input:any)=>nextResponse(input.requestId)})};
+  await instance.pollReport();
+  nextResponse=id=>Response.json({commandId:id,status:'error',errorCode:'OUTCOME_UNKNOWN'});
+  await instance.pollReport();
+  expect(state.storage.sql.exec('SELECT * FROM oauth_report').toArray()).toHaveLength(0);
+  nextResponse=id=>Response.json({commandId:id,status:'offline',errorCode:'BLE_OFFLINE'});
+  await instance.pollReport();
+  expect(state.storage.sql.exec('SELECT payload FROM oauth_report').toArray()).toHaveLength(1);
+  expect(JSON.parse(state.storage.sql.exec<{payload:string}>('SELECT payload FROM oauth_report').toArray()[0].payload)).toEqual({online:false});
+  nextResponse=id=>Response.json({commandId:id,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:40,brightnessRaw:102,observedAt:Date.now()/1000+0.1});
+  await instance.pollReport();
+  expect(JSON.parse(state.storage.sql.exec<{payload:string}>('SELECT payload FROM oauth_report').toArray()[0].payload)).toEqual({online:true,on:true,brightness:40});
+  await state.storage.deleteAlarm();
+ });
+});
+it('alarm preserves 10s exponential backoff when report fails right after drainCommand',async()=>{
+ const a=((env as any).HUE_AUTH as DurableObjectNamespace<AuthStore>).getByName(crypto.randomUUID());
+ const setup=await a.issueSetup();if(!setup.ok)throw Error('setup');
+ const f=await a.createFlow({clientId:'client',redirectUri:'https://redirect.test',state:'x',csrf:'csrf'});if(!f.ok)throw Error('flow');
+ const c=await a.consent({flowId:f.value.flowId,csrf:'csrf',setupCode:setup.value.code});if(!c.ok)throw Error('consent');
+ const t=await a.exchange({grant_type:'authorization_code',client_id:'client',redirect_uri:'https://redirect.test',code:c.value.code});if(!t.ok)throw Error('token');
+ const identity=(await a.authenticate(t.value.access_token))!;
+ await runInDurableObject(a,async(instance:any,state)=>{
+  instance.env.GOOGLE_QUEUE_ENABLED='true';instance.env.REPORT_STATE_ENABLED='true';instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(c:any)=>Response.json({commandId:c.requestId,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:50,brightnessRaw:127,observedAt:Date.now()/1000})})};
+  instance.reporter={report:async()=>{throw Error('HOMEGRAPH_REQUEST_503');}};
+  expect(await instance.submitCommands(identity.grantId,'backoff-1',[{on:true}])).toEqual({accepted:true});
+  await state.storage.deleteAlarm();
+  const before=Date.now();
+  await instance.alarm();
+  const scheduled=await state.storage.getAlarm();
+  expect(scheduled).not.toBeNull();
+  expect(scheduled!-before).toBeGreaterThanOrEqual(9000);
+  await state.storage.deleteAlarm();
+ });
+});

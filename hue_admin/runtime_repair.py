@@ -67,6 +67,22 @@ def repair_runtime(root,release_id,*,resume=False,failpoint=lambda phase:None):
     size=sum(entry['size'] for name,entry in manifest['files'].items()
              if name=='bin/cloudflared' or name.startswith('agent/'))+4*1024*1024
     if shutil.disk_usage(root).free<size:raise ValueError('RUNTIME_REPAIR_DISK_SPACE')
+    identity=None;agent=None;marker=None
+    if policy['tunnel']=='dedicated':
+        load_service_identity(root,'hue-tunnel')
+    if policy['agent']=='dedicated':
+        from .agent_runtime import _master,_marker
+        from .usb_policy import pinned_transport
+        identity=load_service_identity(root,'hue-agent')
+        agent=agent_runtime_paths(root,release_id)
+        marker=_marker(root,identity)
+        cfg=json.loads(_master(root/'config/agent.json',8192),object_pairs_hook=unique_object)
+        manager.validate_agent_config(root,cfg)
+        usb=json.loads(_master(root/'config/usb.json',4096),object_pairs_hook=unique_object)
+        if (not isinstance(usb,dict) or set(usb)!={'schema','vendor','product','serial'}
+                or type(usb['schema']) is not int or usb['schema']!=1):
+            raise ValueError('AGENT_USB_POLICY')
+        pinned_transport({key:usb[key] for key in ('vendor','product','serial')})
     previous=receipt(root)
     if previous and previous['phase']=='prepared':
         if previous['releaseId']!=release_id:raise ValueError('RUNTIME_REPAIR_RECOVERY_REQUIRED')
@@ -74,17 +90,20 @@ def repair_runtime(root,release_id,*,resume=False,failpoint=lambda phase:None):
     else:
         if resume:return {'runtimePrepared':False}
         value={'schema':1,'phase':'prepared','releaseId':release_id,'backup':'backups/runtime-repair-'+uuid.uuid4().hex}
+    tunnel=runtime_paths(root,release_id);device=root.stat().st_dev
+    if policy['agent']=='dedicated':
+        if marker is not None and marker['phase']=='ready' and not agent['state_dir'].exists():
+            raise ValueError('RUNTIME_REPAIR_STATE_MISSING')
     backup=root/value['backup'];private_directory(backup)
     atomic_replace(root/'state/runtime-repair.json',json.dumps(value,sort_keys=True).encode());failpoint('prepared')
-    tunnel=runtime_paths(root,release_id);device=root.stat().st_dev
     _directory(tunnel['base'],0,0,0o755,device,root_owned=True)
     targets=[]
     if policy['tunnel']=='dedicated':
         targets.extend((tunnel['base']/'bin',tunnel['credentials'],tunnel['data']))
     if policy['agent']=='dedicated':
-        identity=load_service_identity(root,'hue-agent');agent=agent_runtime_paths(root,release_id)
         _directory(agent['base'],0,identity['gid'],0o710,device,root_owned=True)
-        _directory(agent['state_dir'],identity['uid'],identity['gid'],0o700,device,root_owned=False)
+        if agent['state_dir'].exists() or agent['state_dir'].is_symlink() or (marker is not None and marker['phase']=='ready'):
+            _directory(agent['state_dir'],identity['uid'],identity['gid'],0o700,device,root_owned=False)
         targets.extend((agent['base']/'code',agent['config_dir'],agent['run_dir'],agent['log_dir']))
     for index,path in enumerate(targets):
         # Only these fixed names are moved. Symlinks are moved as links, never

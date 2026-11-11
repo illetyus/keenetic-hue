@@ -36,6 +36,36 @@ readiness for the new slot.
 processes are stopped and the system automatically rolls back to the previous
 verified release.
 
+### Refreshing `root/manager` After `huectl update`
+
+`/opt/bin/huectl update` intentionally preserves `root/manager` isolation: it
+extracts `releases/VERSION/` and updates `active.json` while leaving
+`/opt/var/lib/keenetic-hue-system/manager/`, `state/bootstrap.json`, and entry shims
+(`/opt/bin/huectl`, `/opt/etc/init.d/S97keenetic-hue`, and
+`/opt/etc/ndm/usb.d/50-keenetic-hue`) unchanged so the running control layer does
+not self-modify during an update. Post-`0.2.0-rc.15` (`Unreleased`) builds surface
+`bootstrapInSync` / `bootstrapSyncRequired` and `bootstrapReleaseId` in `huectl
+update` output so operators can see when `root/manager` still belongs to an older
+release.
+
+To refresh `root/manager`, `state/bootstrap.json`, and the entry shims to match the
+new release, re-run the SHA-256-verified standalone `deploy/install_release.py`
+copy in `/opt/var/lib/keenetic-hue-trusted/install_release.py` (see
+[installation](installation.md) for digest verification):
+
+```sh
+python3 -I /opt/var/lib/keenetic-hue-trusted/install_release.py \
+  /opt/var/tmp/hue-install/keenetic-hue-VERSION.huerel \
+  --trust-key /opt/var/tmp/hue-install/release-trust.pub \
+  --trust-key-sha256 PUBLIC_KEY_SHA256
+```
+
+During bootstrap provisioning, existing entry shims are upgraded automatically when
+their contents match the previously committed release's `service/` templates (or a
+saved `entry-*.previous` backup from an interrupted bootstrap attempt); unrecognized
+or externally modified entry files continue to fail closed with
+`BOOTSTRAP_UNRELATED_ENTRY`.
+
 ## Rolling Back to the Previous Release
 
 ```sh

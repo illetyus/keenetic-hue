@@ -19,4 +19,12 @@ describe('strict cross-language protocol',()=>{
     expect(()=>verifiedResult({status:'verified',commandId:requestId,deviceId:'hue-lwa017-01',on:1,brightness:40,brightnessRaw:102,observedAt:Date.now()/1000},requestId)).toThrow();
     expect(()=>verifiedResult({status:'verified',commandId:requestId,deviceId:'hue-lwa017-01',on:true,brightness:100,brightnessRaw:1,observedAt:Date.now()/1000},requestId)).toThrow();
   });
+  it('supports bounded cached maxAgeSeconds without relaxing future clock skew',()=>{
+    const now=Date.now()/1000;
+    const old={status:'verified',commandId:requestId,deviceId:'hue-lwa017-01',on:true,brightness:40,brightnessRaw:102,observedAt:now-20};
+    expect(()=>verifiedResult(old,requestId)).toThrow();
+    expect(verifiedResult(old,requestId,30).observedAt).toBe(old.observedAt);
+    const future={...old,observedAt:now+15};
+    expect(()=>verifiedResult(future,requestId,1800)).toThrow();
+  });
 });

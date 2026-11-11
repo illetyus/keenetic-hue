@@ -193,7 +193,7 @@ export class AuthStore extends DurableObject<Env>{
   async queueReport(grantId:string,value:Observation):Promise<{queued:boolean}>{
     return this.enqueueReport(grantId,value);
   }
-  private async enqueueReport(grantId:string,value:Observation,force=false):Promise<{queued:boolean}>{
+  private async enqueueReport(grantId:string,value:Observation,force=false,schedule=true):Promise<{queued:boolean}>{
     if(!force&&!this.reportsEnabled())return {queued:false};
     const grant=this.currentGrant();if(!grant||grant.id!==grantId)return {queued:false};
     if(typeof value.online!=='boolean'||!Number.isFinite(value.observedAt)||Math.abs(now()-value.observedAt)>10)return {queued:false};
@@ -204,7 +204,7 @@ export class AuthStore extends DurableObject<Env>{
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO oauth_report_seen VALUES(1,?)',value.observedAt);
       this.ctx.storage.sql.exec('INSERT OR REPLACE INTO oauth_report VALUES(1,?,?,?,0)',grantId,JSON.stringify(payload),value.observedAt);
     });
-    await this.scheduleSoon(1000);return {queued:true};
+    if(schedule)await this.scheduleSoon(1000);return {queued:true};
   }
   async alarm(){
     await this.drainCommand();
@@ -233,8 +233,8 @@ export class AuthStore extends DurableObject<Env>{
         const response=await this.env.HUE_RELAY.getByName(DEVICE_ID).execute({requestId:job.id,deviceId:DEVICE_ID,operation:'set',...job.fields},{kind:'google',grantId:job.grant});
         if(response.status===200){
           const result=verifiedResult(await response.json(),job.id);outcome=result.errorCode??result.status;
-          if(result.status==='verified')await this.queueReport(job.grant,{online:true,on:result.on,brightness:result.brightness,observedAt:result.observedAt!});
-          else if(result.status==='offline')await this.queueReport(job.grant,{online:false,observedAt:now()});
+          if(result.status==='verified')await this.enqueueReport(job.grant,{online:true,on:result.on,brightness:result.brightness,observedAt:result.observedAt!},false,false);
+          else if(result.status==='offline')await this.enqueueReport(job.grant,{online:false,observedAt:now()},false,false);
         }
       }catch{/* Claimed operations are never replayed after an uncertain delivery. */}
       this.commands.finish(job.id,outcome,now());
@@ -257,10 +257,13 @@ export class AuthStore extends DurableObject<Env>{
   async pollReport(){
     const grant=this.currentGrant();if(!this.reportsEnabled()||!grant||this.commands.status().pending)return;
     try{
-      const response=await this.env.HUE_RELAY.getByName(DEVICE_ID).execute({requestId:crypto.randomUUID(),deviceId:DEVICE_ID,operation:'query'},{kind:'google',grantId:grant.id});
-      const value=await response.json() as any;
-      if(value.status==='verified')await this.queueReport(grant.id,{online:true,on:value.on,brightness:value.brightness,observedAt:value.observedAt});
-      else await this.queueReport(grant.id,{online:false,observedAt:now()});
+      const requestId=crypto.randomUUID();
+      const response=await this.env.HUE_RELAY.getByName(DEVICE_ID).execute({requestId,deviceId:DEVICE_ID,operation:'query'},{kind:'google',grantId:grant.id});
+      if(response.status!==200)return;
+      const result=verifiedResult(await response.json(),requestId);
+      if(this.commands.status().pending)return;
+      if(result.status==='verified')await this.queueReport(grant.id,{online:true,on:result.on,brightness:result.brightness,observedAt:result.observedAt!});
+      else if(result.status==='offline')await this.queueReport(grant.id,{online:false,observedAt:now()});
     }catch{/* No guessed physical state. The next scheduled observation retries. */}
   }
   private reportHealth(outcome:string,observed:number){this.ctx.storage.sql.exec('INSERT OR REPLACE INTO oauth_report_health VALUES(1,?,?,?)',outcome,now(),observed);}
@@ -277,7 +280,7 @@ export class AuthStore extends DurableObject<Env>{
       const value=verifiedResult(await response.json(),requestId);if(value.status!=='verified')throw Error('DEVICE_UNAVAILABLE');
       if(this.currentGrant()?.id!==grant.id)throw Error('GRANT_CHANGED');
       const state={online:true,on:value.on!,brightness:value.brightness!};
-      if(!(await this.enqueueReport(grant.id,{...state,observedAt:value.observedAt!},true)).queued)throw Error('OBSERVATION_SUPERSEDED');
+      if(!(await this.enqueueReport(grant.id,{...state,observedAt:value.observedAt!},true,false)).queued)throw Error('OBSERVATION_SUPERSEDED');
       await this.sendPendingReport(true);
       const health=(await this.reportStatus()).last;
       reported=health?.outcome==='accepted'&&health.observed===value.observedAt;

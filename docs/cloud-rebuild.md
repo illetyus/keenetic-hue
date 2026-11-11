@@ -41,7 +41,7 @@ values into JSONC files. Use the locked Wrangler version in `package-lock.json`.
 
 In the Cloudflare dashboard, navigate to **Workers VPC → Tunnels → Create** to
 create a Tunnel. On the Keenetic router, always use the verified MIPS `cloudflared`
-binary shipped inside the signed RC12 bundle—never run generic architecture
+binary shipped inside the signed RC15 release bundle—never run generic architecture
 install commands from the dashboard on the router. Store the Tunnel token in your
 password manager and copy it via SFTP as a `0600` root-owned file to
 `/opt/var/lib/keenetic-hue-system/secrets/tunnel.token`, then run
@@ -85,8 +85,11 @@ Then pair the router with `huectl configure-issuer --origin https://WORKER.ACCOU
 
 Preserve the `HUE_RELAY` (`Relay`) and `HUE_AUTH` (`AuthStore`) Durable Object
 bindings and migration tags in `wrangler.personal.jsonc`. Verify that
-`PUBLIC_ORIGIN`, `GOOGLE_PROJECT_ID`, and `OAUTH_CLIENT_ID` match your environment,
-then run:
+`PUBLIC_ORIGIN`, `GOOGLE_PROJECT_ID`, `OAUTH_CLIENT_ID`, and
+`GOOGLE_QUEUE_ENABLED` (`"true"`, already configured in
+[`wrangler.tunnel.example.jsonc`](../cloud/wrangler.tunnel.example.jsonc)) match your
+environment—`GOOGLE_QUEUE_ENABLED='true'` is required for reliable multi-step
+`EXECUTE` commands such as `OnOff` combined with `BrightnessAbsolute`—then run:
 
 ```sh
 node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.personal.jsonc

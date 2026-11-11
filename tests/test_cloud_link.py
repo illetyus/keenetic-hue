@@ -144,3 +144,38 @@ class CloudLinkTests(unittest.IsolatedAsyncioTestCase):
         mock_priv.assert_called_once_with('token-symlink')
         self.assertEqual(emitted[0][0], 'cloud_retry')
         self.assertEqual(emitted[0][1]['errorType'], 'ValueError')
+
+    async def test_heartbeat_send_failure_cleans_up_jobs_and_session(self):
+        started = asyncio.Event()
+        job_done = asyncio.Event()
+        class FailingPingSocket(Socket):
+            async def send(self, value):
+                if value == 'ping':
+                    await self.incoming.put(ConnectionError('recv closed'))
+                    raise ConnectionError('send failed')
+                await super().send(value)
+        class BlockingController:
+            session_id = 'process1'
+            ready = True
+            async def execute(self, data, *, context):
+                started.set()
+                try:
+                    while context.is_current():
+                        await asyncio.sleep(0.01)
+                finally:
+                    job_done.set()
+                return {'commandId': data['commandId'], 'status': 'error', 'errorCode': 'STALE_SESSION'}
+        self.link = CloudLink(BlockingController(), {})
+        self.ws = FailingPingSocket()
+        with patch('hue_agent.cloud_link.HEARTBEAT_SECONDS', 0.01, create=True):
+            task = await self.session()
+            cmd = self.command()
+            await self.ws.incoming.put(json.dumps(dict(v=1, type='command', sessionId='link1', commandId=cmd['commandId'], command=cmd)))
+            await asyncio.wait_for(started.wait(), 1)
+            try:
+                await asyncio.wait_for(task, 1)
+            except ConnectionError:
+                pass
+        self.assertIsNone(self.link.socket)
+        self.assertIsNone(self.link.current)
+        self.assertTrue(job_done.is_set())

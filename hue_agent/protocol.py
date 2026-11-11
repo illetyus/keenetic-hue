@@ -57,8 +57,13 @@ class Command:
         if type(data['sequence']) is not int or not 0 <= data['sequence'] < 2**63:
             raise ProtocolError('INVALID_SEQUENCE')
         expiry = data['expiresAt']
-        if type(expiry) not in (int, float) or (type(expiry) is float and not math.isfinite(expiry)):
+        if type(expiry) not in (int, float):
             raise ProtocolError('INVALID_EXPIRY')
+        try:
+            if not math.isfinite(expiry):
+                raise ProtocolError('INVALID_EXPIRY')
+        except OverflowError:
+            raise ProtocolError('INVALID_EXPIRY') from None
         if expiry > current_time+60:
             raise ProtocolError('INVALID_EXPIRY')
         if not allow_expired and expiry <= current_time:

@@ -16,7 +16,7 @@ def backup_to(path, password):
     if path.exists() or path.is_symlink() or any(p.is_symlink() for p in path.parents):
         raise ValueError('BACKUP_OUTPUT_EXISTS_OR_SYMLINK')
     info=path.parent.stat()
-    if not stat.S_ISDIR(info.st_mode) or (sys.platform=='linux' and info.st_mode & 0o077):
+    if not stat.S_ISDIR(info.st_mode) or (sys.platform=='linux' and (info.st_mode & 0o077 or (hasattr(os,'geteuid') and os.geteuid()==0 and info.st_uid!=0))):
         raise ValueError('BACKUP_PRIVATE_DIRECTORY_REQUIRED')
     files,identity=capture_current()
     raw=seal(files,password,identity)

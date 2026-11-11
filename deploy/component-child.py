@@ -16,7 +16,7 @@ if component not in ('agent','tunnel') or not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\
 root=Path(root_value).absolute();release=root/'releases'/release_id
 if root.is_symlink() or release.is_symlink() or any(p.is_symlink() for p in release.parents):raise SystemExit('CHILD_PATH')
 sys.path.insert(0,str(release/'manager'))
-from hue_admin.service_manager import private_bytes,validate_agent_config,tunnel_arguments,environment
+from hue_admin.service_manager import private_bytes,validate_agent_config,environment
 os.umask(0o077);os.chdir(root)
 env=environment(root);env['HUE_RELEASE_ID']=release_id
 from hue_admin.runtime_policy import release_policy
@@ -52,4 +52,7 @@ else:
     env=tunnel_environment(paths['data'],ca)
     os.chdir(paths['data'])
     drop_identity(identity['uid'],identity['gid'])
+    log_path=paths['log']
+    if not log_path.is_symlink() and log_path.is_file() and log_path.stat().st_size>=131072:
+        log_path.replace(log_path.with_name(log_path.name+'.previous'))
     os.execve(paths['binary'],[str(paths['binary']),*restricted_arguments(paths['token'],paths['log'])],env)

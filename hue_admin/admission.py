@@ -36,15 +36,21 @@ def already_managed(root,argv):
     except (OSError,ValueError,KeyError,TypeError):return False
 
 
+def is_help_or_empty(argv):
+    if not argv:return True
+    head=argv[:argv.index('--')] if '--' in argv else argv
+    return '-h' in head or '--help' in head
+
+
 @contextmanager
 def admit(root,argv,timeout=45):
     root=Path(root).absolute()
-    if argv and (argv[0] in ('status','health','diagnose') or '--help' in argv or '-h' in argv):
+    if is_help_or_empty(argv) or (argv and argv[0] in ('status','health','diagnose')):
         yield True;return
     if already_managed(root,argv):yield False;return
     if root.is_symlink() or any(p.is_symlink() for p in root.parents):raise ValueError('MANAGER_PATH')
     import fcntl
-    fd=os.open(root/'cli-admission.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+    fd=os.open(root/'cli-admission.lock',os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0),0o600)
     try:
         info=os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_mode&0o077:raise ValueError('MANAGER_LOCK_FILE')

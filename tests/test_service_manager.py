@@ -215,3 +215,33 @@ while True:time.sleep(.1)
             if saved is None:os.close(9)
             else:os.dup2(saved,9);os.close(saved)
             os.close(victim)
+
+
+class ServiceManagerCleanupTests(unittest.TestCase):
+    def test_cleanup_failed_spawn_pops_already_exited_child(self):
+        from unittest.mock import MagicMock
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/'run').mkdir();(root/'logs').mkdir()
+            (root/'active.json').write_text('{"schema":1,"releaseId":"0.2.0"}')
+            dead_child=MagicMock()
+            dead_child.pid=43210
+            dead_child.poll.return_value=1
+            with patch.object(manager,'selection',return_value='0.2.0'), \
+                 patch.object(manager,'owner_record',return_value=None), \
+                 patch.object(manager,'supervisor_owned',return_value=False), \
+                 patch.object(manager,'file_lock'), \
+                 patch.object(manager,'stop_orphan',return_value=True), \
+                 patch.object(manager,'finalize_stopped_agent'), \
+                 patch.object(manager,'verify_selected',return_value='0.2.0'), \
+                 patch.object(manager,'emit'), \
+                 patch.object(manager,'process',return_value=None), \
+                 patch.object(manager.subprocess,'Popen',return_value=dead_child), \
+                 patch.object(manager.time,'monotonic',side_effect=[0.0,10.0]):
+                with manager._spawned_lock:
+                    manager._spawned.clear()
+                result=manager.start_locked('agent',root)
+                self.assertFalse(result)
+                with manager._spawned_lock:
+                    self.assertNotIn((str(root),'agent'),manager._spawned)
+                dead_child.wait.assert_called_once()

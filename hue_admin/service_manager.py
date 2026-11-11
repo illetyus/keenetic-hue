@@ -267,10 +267,14 @@ def finalize_stopped_agent(component,root,record):
 def start_locked(component,root):
     stage='selection';release_id=None;attempt=None;child=None
     def cleanup_failed_spawn():
-        if child is not None and child.poll() is None:
-            try:child.terminate();child.wait(timeout=2)
-            except (OSError,subprocess.SubprocessError):
-                try:child.kill();child.wait(timeout=1)
+        if child is not None:
+            if child.poll() is None:
+                try:child.terminate();child.wait(timeout=2)
+                except (OSError,subprocess.SubprocessError):
+                    try:child.kill();child.wait(timeout=1)
+                    except (OSError,subprocess.SubprocessError):pass
+            else:
+                try:child.wait(timeout=1)
                 except (OSError,subprocess.SubprocessError):pass
             with _spawned_lock:_spawned.pop((str(root),component),None)
     def failed(reason):

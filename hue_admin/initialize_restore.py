@@ -79,7 +79,7 @@ def validate_files(root,files,identity,key,*,release_id=None):
             or origin.path not in ('','/') or origin.query or origin.fragment):raise ValueError('INITIALIZE_ORIGIN')
     for name in ('api','device','tunnel','setup-issuer'):
         token=files['secrets/'+name+'.token'].decode('ascii').strip()
-        if not 32<=len(token)<=256 or any(c.isspace() for c in token):raise ValueError('INITIALIZE_TOKEN')
+        if not 32<=len(token)<=4096 or any(c.isspace() for c in token):raise ValueError('INITIALIZE_TOKEN')
     if release_id is not None:
         from .runtime_policy import release_policy
         if release_policy(root,release_id)['agent']=='dedicated':

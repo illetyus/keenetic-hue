@@ -43,8 +43,8 @@ Empirical software engineering studies on open-source adoption, developer trust,
 
 | Design Dimension | Literature Basis | Applied Decision |
 | --- | --- | --- |
-| **Positioning (`Why` & `Status`)** | Prana et al. (2019) | Side-by-side architectural trade-off table and explicit RC12 acceptance boundaries at the top of the README. |
+| **Positioning (`Why` & `Status`)** | Prana et al. (2019) | Side-by-side architectural trade-off table and explicit RC15 acceptance boundaries at the top of the README. |
 | **Technical Visuals (`hero.png`, `architecture.svg`)** | Venigalla & Chimalakonda (2022); GitHub Social Preview (1280×640, <1 MB) | Original vector/PNG diagrams with zero third-party vendor logos, showing trust zones (`Cloudflare` ↔ `Keenetic Entware` ↔ `Hue BLE`), UID/GID isolation, and local sockets. |
 | **3-Stage Setup & Verification** | Gao et al. (2025); Diátaxis | Pre-installation → Signed Installation → `huectl health --live --json` verification in the README, backed by 8 task-oriented guides. |
 | **Feature → Module → Test Matrix** | Puhlfürß et al. (2022/2024) | Direct clickable links from every architectural claim to its Python/TypeScript source module and unit test suite. |
-| **Publication Hygiene & Evidence Separation** | Hora et al. (2026); [`tools/check_publication.py`](../tools/check_publication.py) | Automated offline check rejects private keys, BLE bonds, tokens, `.huebak` archives, and personal paths; portable unit tests (81 Python + 64 Worker) are kept distinct from physical hardware acceptance. |
+| **Publication Hygiene & Evidence Separation** | Hora et al. (2026); [`tools/check_publication.py`](../tools/check_publication.py) | Automated offline check rejects private keys, BLE bonds, tokens, `.huebak` archives, and personal paths; portable unit tests (91 portable Python tests out of 562 total Python tests including native Linux/POSIX/root checks, plus 70 Cloudflare Worker tests) are kept distinct from physical hardware acceptance (`0.2.0-rc.15` vs. locally tested `Unreleased`). |

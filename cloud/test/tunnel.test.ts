@@ -130,3 +130,17 @@ it('Tunnel recovery requires a separately deployed new device credential',async(
   expect(result.errorCode).toBe('BLE_OFFLINE');expect(await state.storage.get('revoked')).toBe(false);
  });
 });
+it('Tunnel keeps revoked state if rotated credential is rejected by router session endpoint',async()=>{
+ const stub=bindings.HUE_RELAY.getByName('tunnel-key-rotation-failed');
+ await runInDurableObject(stub,async(instance:any,state)=>{
+  await state.storage.put({revoked:true,revokedFingerprint:'old-fingerprint'});
+  instance.keyFingerprint=Promise.resolve('new-fingerprint');
+  instance.env.HUE_TUNNEL={fetch:async()=>new Response(null,{status:401})};
+  const first=await (await instance.execute({requestId:crypto.randomUUID(),deviceId:'hue-lwa017-01',operation:'query'},{kind:'operator'})).json();
+  expect(first.errorCode).toBe('TUNNEL_OFFLINE');
+  expect(await state.storage.get('revoked')).toBe(true);
+  instance.keyFingerprint=Promise.resolve('old-fingerprint');
+  const rollback=await (await instance.execute({requestId:crypto.randomUUID(),deviceId:'hue-lwa017-01',operation:'query'},{kind:'operator'})).json();
+  expect(rollback.errorCode).toBe('AGENT_REVOKED');
+ });
+});

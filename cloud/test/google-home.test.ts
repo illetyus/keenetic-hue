@@ -98,3 +98,19 @@ it('validates every execution before the first write',async()=>{
  expect((await googleRoute(request('EXECUTE',payload),f.env))!.status).toBe(400);expect(f.calls).toHaveLength(0);
  expect(diagnostics).toContainEqual({intent:'EXECUTE',stage:'params',fields:['brightness'],outcome:'invalid_request'});
 });
+it('accepts cached Relay retries older than 10s within Relay retention window without 400 error',async()=>{
+ vi.useFakeTimers();try{
+  const f=fixture();const start=Date.now()/1000;
+  const cachedQuery={commandId:'q',status:'verified',deviceId:id,on:false,brightness:0,brightnessRaw:254,observedAt:start};
+  const cachedSet={commandId:'s',status:'verified',deviceId:id,on:true,brightness:40,brightnessRaw:102,observedAt:start};
+  (f.env.HUE_RELAY as any).getByName=()=>({execute:async(input:any)=>Response.json({...((input.operation==='query')?cachedQuery:cachedSet),commandId:input.requestId})});
+  vi.setSystemTime((start+20)*1000);
+  const q=await googleRoute(request('QUERY',{devices:[{id}]},'cached-query-1'),f.env);
+  expect(q!.status).toBe(200);
+  expect((await q!.json() as any).payload.devices[id]).toEqual({online:true,on:false,brightness:0});
+  vi.setSystemTime((start+60)*1000);
+  const e=await googleRoute(request('EXECUTE',{commands:[{devices:[{id}],execution:[{command:'action.devices.commands.OnOff',params:{on:true}}]}]},'cached-exec-1'),f.env);
+  expect(e!.status).toBe(200);
+  expect((await e!.json() as any).payload.commands[0]).toMatchObject({ids:[id],status:'SUCCESS',states:{online:true,on:true,brightness:40}});
+ }finally{vi.useRealTimers();}
+});

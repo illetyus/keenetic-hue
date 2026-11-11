@@ -18,7 +18,7 @@ class Journal:
     def retention_now(self):
         return self.wall_anchor+time.monotonic()-self.mono_anchor
 
-    def lookup(self, command):
+    def lookup(self, command, *, include_pending=True):
         row = self.db.execute('SELECT hash,result FROM commands WHERE id=? AND created>?',
                               (command.command_id, self.retention_now()-1800)).fetchone()
         if not row:
@@ -26,8 +26,11 @@ class Journal:
         expected=('query:' if command.operation=='query' else '')+command.fingerprint
         if row[0] != expected:
             raise ProtocolError('COMMAND_ID_CONFLICT')
-        return json.loads(row[1]) if row[1] else {
-            'commandId': command.command_id, 'status':'error', 'errorCode':'OUTCOME_UNKNOWN'}
+        if not row[1]:
+            if not include_pending:
+                return None
+            return {'commandId': command.command_id, 'status':'error', 'errorCode':'OUTCOME_UNKNOWN'}
+        return json.loads(row[1])
 
     def reserve(self, command):
         cached = self.lookup(command)

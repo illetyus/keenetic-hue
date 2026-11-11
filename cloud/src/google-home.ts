@@ -59,7 +59,8 @@ export async function googleRoute(request:Request,env:Env,ctx?:ExecutionContext)
    let raw:any;try{raw=await within(response.json(),deadline);}catch{return {commandId:id,status:'error',errorCode:'OUTCOME_UNKNOWN'};}
    // Offline results have no fabricated state; validated successful results are mandatory.
    if(raw?.status==='offline')return {commandId:id,status:'offline',errorCode:'BLE_OFFLINE'};
-   return verifiedResult(raw,id);
+   try{return verifiedResult(raw,id,operation==='query'?30:1800);}
+   catch{return {commandId:id,status:'error',errorCode:'OUTCOME_UNKNOWN'};}
   };
   if(input.intent==='action.devices.SYNC')return respond({agentUserId:identity.ownerId,devices:[{id:DEVICE_ID,type:'action.devices.types.LIGHT',traits:['action.devices.traits.OnOff','action.devices.traits.Brightness'],name:{name:'Hue Lamba'},willReportState:env.REPORT_STATE_ENABLED==='true'&&Boolean(env.HOMEGRAPH_SERVICE_ACCOUNT),deviceInfo:{manufacturer:'Signify Netherlands B.V.',model:'LWA017'}}]});
   if(input.intent==='action.devices.DISCONNECT'){

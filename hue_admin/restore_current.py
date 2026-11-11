@@ -3,6 +3,7 @@ from contextlib import closing, contextmanager
 import json
 import os
 import sqlite3
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -21,9 +22,14 @@ def targets(root=None):
 def management_lock(root=None):
     import fcntl
     root=SYSTEM if root is None else Path(root)
+    root=root.absolute()
     path=root/'management.lock'
-    fd=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+    if root.is_symlink() or any(p.is_symlink() for p in root.parents) or path.is_symlink():
+        raise ValueError('MANAGEMENT_LOCK_SYMLINK')
+    fd=os.open(path,os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0),0o600)
     try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_mode&0o077:raise ValueError('MANAGEMENT_LOCK_FILE')
         try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('MANAGEMENT_BUSY') from None
         yield

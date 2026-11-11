@@ -1,6 +1,6 @@
 # Reinstallation After USB or Entware Loss
 
-This guide covers installing the signed RC12 release onto a new Entware USB drive
+This guide covers installing the signed RC15 release onto a new Entware USB drive
 and restoring an encrypted `.huebak` backup from the same hardware setup. Always
 verify the target physical disk before formatting a USB drive.
 
@@ -34,7 +34,7 @@ on the target drive—verify the physical disk carefully.
 
 Enable Keenetic's Open Package Support (OPKG) and EXT filesystem components, select
 the USB drive on the OPKG page, and use the Entware installer matching your CPU
-architecture. The verified RC12 package profile targets `mips-3.4` with CPython
+architecture. The verified RC15 package profile targets `mips-3.4` with CPython
 3.13. Connect to Entware SSH on its configured port (commonly `222` or `22`
 depending on your Keenetic SSH settings).
 
@@ -86,7 +86,7 @@ chmod 600 /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak
 ## 5. Dry-Run Verification and Initialization Restore
 
 These commands accept the **10-file unified backup format** (`VERSION` is the
-installed release ID, e.g. `0.2.0-rc.12`):
+installed release ID, e.g. `0.2.0-rc.15`):
 
 ```sh
 huectl restore /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak \

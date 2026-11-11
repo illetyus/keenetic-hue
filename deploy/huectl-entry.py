@@ -16,6 +16,9 @@ try:
         else:
             print('SERVICE_ALREADY_MANAGED: connectivity requires health check')
             result=0
+except KeyboardInterrupt:
+    print('HUE_OPERATION_INTERRUPTED',file=sys.stderr)
+    result=130
 except Exception:
     print('HUE_BOOTSTRAP_VERIFICATION_FAILED: use the trusted recovery command',file=sys.stderr)
     result=1

@@ -37,3 +37,17 @@ class AdmissionTests(unittest.TestCase):
             self.assertTrue(allowed_help)
         with admit(root, ['install', '-h'], timeout=0) as allowed_subcmd:
             self.assertTrue(allowed_subcmd)
+
+    def test_empty_argv_bypasses_admission_lock_and_double_dash_does_not(self):
+        from unittest.mock import MagicMock
+        root = Path('/nonexistent/fixture')
+        with admit(root, [], timeout=0) as allowed_empty:
+            self.assertTrue(allowed_empty)
+        with tempfile.TemporaryDirectory() as tmp:
+            troot = Path(tmp)
+            with patch.dict('sys.modules', {'fcntl': MagicMock()}), \
+                 patch('hue_admin.admission.os.open', side_effect=OSError('LOCK_ATTEMPTED')) as opener:
+                with self.assertRaisesRegex(OSError, 'LOCK_ATTEMPTED'):
+                    with admit(troot, ['backup', '--', '-h'], timeout=0):
+                        pass
+                opener.assert_called_once()

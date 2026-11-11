@@ -50,3 +50,21 @@ class AgentStorageTests(unittest.TestCase):
             with self.subTest(uid=uid,gid=gid,limit=limit),patch('hue_admin.agent_storage.os.open') as opened:
                 with self.assertRaises(ValueError):read_agent_private(Path('/fixed/file'),uid,gid,limit)
                 opened.assert_not_called()
+
+    def test_prune_recovery_archives_keeps_latest_two_and_ignores_unrelated(self):
+        from hue_admin.agent_storage import prune_recovery_archives
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            dirs=[]
+            for idx in range(4):
+                d=root/f'sqlite-recovery-000{idx}'
+                d.mkdir()
+                (d/'receipt.json').write_text('{}')
+                os.utime(d,(1000+idx,1000+idx))
+                dirs.append(d)
+            unrelated=root/'other-dir';unrelated.mkdir()
+            plain_file=root/'sqlite-recovery-file';plain_file.write_text('keep')
+            prune_recovery_archives(root,keep=2)
+            self.assertFalse(dirs[0].exists());self.assertFalse(dirs[1].exists())
+            self.assertTrue(dirs[2].exists());self.assertTrue(dirs[3].exists())
+            self.assertTrue(unrelated.exists());self.assertTrue(plain_file.exists())

@@ -12,7 +12,8 @@ async function body(request:Request):Promise<unknown>{
   if(!request.body)throw new ProtocolError('INVALID_MESSAGE');
   const reader=request.body.getReader();let size=0;const chunks:Uint8Array[]=[];
   try{while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>4096)throw new ProtocolError('INVALID_SIZE');chunks.push(value);}}finally{reader.releaseLock();}
-  const all=new Uint8Array(size);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.length;}return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(all));
+  const all=new Uint8Array(size);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.length;}
+  try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(all));}catch(error){if(error instanceof SyntaxError)throw error;throw new ProtocolError('INVALID_MESSAGE');}
 }
 export default {
   async scheduled(_event:ScheduledController,env:Env,ctx:ExecutionContext){if(env.HUE_AUTH)ctx.waitUntil(env.HUE_AUTH.getByName('owner').pollReport());},

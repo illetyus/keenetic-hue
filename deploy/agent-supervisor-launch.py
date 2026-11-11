@@ -23,10 +23,11 @@ def stop_orphan():
             fields=Path(f'/proc/{pid}/stat').read_text().rsplit(') ',1)[1].split()
             if fields[0]=='Z':return None
             return fields[19],Path(f'/proc/{pid}/cmdline').read_bytes()
-        except FileNotFoundError:return None
+        except (FileNotFoundError, ProcessLookupError, OSError):return None
     before=identity()
     if before is not None:
-        args=before[1].rstrip(b'\0').decode().split('\0')
+        try:args=before[1].rstrip(b'\0').decode().split('\0')
+        except UnicodeDecodeError:return False
         wrapper=['-I',str(BASE / 'app' / 'agent-foreground.py')]
         agent=['-u','-m','hue_agent','--config',str(BASE/'config.json')]
         if (not args or Path(args[0]).resolve()!=Path(sys.executable).resolve()
@@ -47,12 +48,23 @@ def stop_orphan():
 
 def main():
     os.umask(0o077)
-    fd = os.open(BASE / 'supervisor.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(BASE / 'supervisor.lock', os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return 1 if '--stop-orphan' in sys.argv else 0
+        if '--stop-orphan' in sys.argv:
+            lock_deadline = time.monotonic() + 1.0
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= lock_deadline:
+                        return 1
+                    time.sleep(0.05)
+        else:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return 0
         if not stop_orphan():return 1
         if '--stop-orphan' in sys.argv:return 0
         if fd != 9:

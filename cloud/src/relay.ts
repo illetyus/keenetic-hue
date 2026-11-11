@@ -20,6 +20,7 @@ export class Relay extends DurableObject<Env>{
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, fingerprint TEXT, command TEXT, result TEXT, created REAL, session TEXT)');
     ctx.storage.sql.exec('CREATE INDEX IF NOT EXISTS commands_created ON commands(created)');
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS revoked_oauth_grants (grant_id TEXT PRIMARY KEY, revoked_at REAL NOT NULL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS tunnel_sequence (id INTEGER PRIMARY KEY, value INTEGER)');
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping','pong'));
   }
   private rows(query:string,...args:any[]):Row[]{return this.ctx.storage.sql.exec<Row>(query,...args).toArray();}
@@ -103,7 +104,6 @@ export class Relay extends DurableObject<Env>{
   }
   private oauthGrantAllowed(grantId?:string):boolean{return grantId===undefined||!this.oauthGrantRevoked(grantId);}
   private async executeCommand(input:ControlInput,oauthGrantId?:string):Promise<Response>{
-    this.cleanQueries();
     if(this.env.HUE_TUNNEL){
       if(this.tunnelActive>=16)return Response.json({commandId:input.requestId,status:'error',errorCode:'BUSY'},{status:503});
       this.tunnelActive++;
@@ -117,6 +117,7 @@ export class Relay extends DurableObject<Env>{
         return await this.executeTunnel(input,oauthGrantId);
       }finally{this.tunnelActive--;release();}
     }
+    this.cleanQueries();
     const revoked=await this.ctx.storage.get<boolean>('revoked');
     if(!this.oauthGrantAllowed(oauthGrantId))return Response.json({commandId:input.requestId,status:'offline',errorCode:'GRANT_REVOKED'});
     const sockets=await this.currentSockets();
@@ -164,8 +165,6 @@ export class Relay extends DurableObject<Env>{
     if(await this.ctx.storage.get<boolean>('revoked')){
       const revokedFingerprint=await this.ctx.storage.get<string>('revokedFingerprint');
       if(!revokedFingerprint||revokedFingerprint===await this.keyFingerprint)return offline('AGENT_REVOKED');
-      // Only a separately deployed device credential may establish a new session.
-      await this.ctx.storage.put('revoked',false);
     }
     if(!this.oauthGrantAllowed(oauthGrantId))return offline('GRANT_REVOKED');
     this.cleanQueries();
@@ -185,11 +184,15 @@ export class Relay extends DurableObject<Env>{
       sessionId=session.sessionId;
     }catch{return offline('TUNNEL_OFFLINE');}
     // Recheck after the network await: another request or revocation may have won.
-    if(await this.ctx.storage.get<boolean>('revoked'))return offline('AGENT_REVOKED');
+    if(await this.ctx.storage.get<boolean>('revoked')){
+      const revokedFingerprint=await this.ctx.storage.get<string>('revokedFingerprint');
+      if(!revokedFingerprint||revokedFingerprint===await this.keyFingerprint)return offline('AGENT_REVOKED');
+      // Only a separately deployed device credential that established a router session clears revocation.
+      await this.ctx.storage.put('revoked',false);
+    }
     if(!this.oauthGrantAllowed(oauthGrantId))return offline('GRANT_REVOKED');
     const raced=cached();if(raced)return raced;
     if(this.full(input))return Response.json({commandId:input.requestId,status:'error',errorCode:'BUSY'},{status:503});
-    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS tunnel_sequence (id INTEGER PRIMARY KEY, value INTEGER)');
     const previous=this.ctx.storage.sql.exec<{value:number}>('SELECT value FROM tunnel_sequence WHERE id=1').toArray()[0]?.value??0;
     const sequence=Math.max(previous+1,Date.now()*1000);
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO tunnel_sequence VALUES (1,?)',sequence);

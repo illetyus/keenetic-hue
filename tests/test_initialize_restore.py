@@ -93,3 +93,16 @@ class InitializeRestoreTests(unittest.TestCase):
                 with patch('hue_admin.initialize_restore.verify_slot',return_value=slot),self.assertRaises(Exception):
                     initialize(root,archive,'wrong' if reason=='password' else 'fixture-password','0.2.0',key,('fixture',),service,lambda:None,legacy=layout)
                 self.assertEqual(calls,[]);self.assertFalse((root/'active.json').exists())
+
+    def test_long_tunnel_token_up_to_4096_is_accepted_and_over_4096_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root,key,files,archive,layout,calls,service,slot=self.fixture(tmp)
+            files['secrets/tunnel.token']=b't'*512
+            archive.write_bytes(seal(files,'fixture-password',{'adapter':'adapter','lamp':'lamp'}))
+            with patch('hue_admin.initialize_restore.verify_slot',return_value=slot):
+                dry=initialize(root,archive,'fixture-password','0.2.0',key,('fixture',),service,lambda:None,True,legacy=layout)
+            self.assertTrue(dry['verified'])
+            files['secrets/tunnel.token']=b't'*4097
+            archive.write_bytes(seal(files,'fixture-password',{'adapter':'adapter','lamp':'lamp'}))
+            with patch('hue_admin.initialize_restore.verify_slot',return_value=slot),self.assertRaisesRegex(ValueError,'INITIALIZE_TOKEN'):
+                initialize(root,archive,'fixture-password','0.2.0',key,('fixture',),service,lambda:None,True,legacy=layout)

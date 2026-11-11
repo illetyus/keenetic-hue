@@ -75,3 +75,9 @@ it('bounds an incomplete incoming request body in time',async()=>{
  const stream=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('partial'));}});
  await expect(limitedText(new Request(origin+'/oauth/token',{method:'POST',body:stream}))).rejects.toThrow('invalid_request');
 },6000);
+it('rejects trailing whitespace and control characters in client_secret cleanly and rejects invalid UTF-8 with 400',async()=>{
+ const base={client_id:client,grant_type:'refresh_token',refresh_token:'A'.repeat(43)};
+ expect((await fetcher('/oauth/token',form({...base,client_secret:'test-client-secret-cccccccccccccccccccccccc '}))).status).toBe(401);
+ expect((await fetcher('/oauth/token',form({...base,client_secret:'test-client-secret-cccccccccccccccccccccccc\n'}))).status).toBe(401);
+ expect((await fetcher('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new Uint8Array([0xff,0xfe])})).status).toBe(400);
+});

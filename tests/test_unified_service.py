@@ -74,3 +74,61 @@ while True:time.sleep(0.1)
         finally:
             victim.terminate();victim.wait(timeout=5)
             (self.base/'tunnel.pid').unlink(missing_ok=True)
+
+
+class LauncherUnitTests(unittest.TestCase):
+    def _load(self, name):
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / 'deploy' / name
+        spec = importlib.util.spec_from_file_location(name.replace('-', '_').replace('.', '_'), path)
+        mod = importlib.util.module_from_spec(spec)
+        from unittest.mock import MagicMock, patch
+        with patch.dict('sys.modules', {'fcntl': MagicMock()}):
+            spec.loader.exec_module(mod)
+        return mod
+
+    def test_agent_supervisor_stop_orphan_handles_non_utf8_and_lock_retry(self):
+        import sys
+        from unittest.mock import MagicMock, patch
+        mod = self._load('agent-supervisor-launch.py')
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / 'agent-child.pid').write_text('12345')
+            with patch.object(mod, 'BASE', base):
+                def fake_read_text(p):
+                    if p == base / 'agent-child.pid':
+                        return '12345'
+                    return '12345 (sh) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 999 0 0'
+                with patch.object(Path, 'read_text', fake_read_text), \
+                     patch.object(Path, 'read_bytes', return_value=b'\xff\xfe\x00'):
+                    self.assertFalse(mod.stop_orphan())
+            fake_fcntl = MagicMock()
+            fake_fcntl.LOCK_EX = 2; fake_fcntl.LOCK_NB = 4
+            fake_fcntl.flock.side_effect = [BlockingIOError(), None]
+            with patch.dict('sys.modules', {'fcntl': fake_fcntl}), \
+                 patch.object(mod, 'fcntl', fake_fcntl), \
+                 patch.object(mod, 'BASE', base), \
+                 patch.object(mod, 'stop_orphan', return_value=True), \
+                 patch.object(mod.os, 'open', return_value=10), \
+                 patch.object(mod.os, 'close'), \
+                 patch.object(mod.time, 'sleep'), \
+                 patch.object(sys, 'argv', ['agent-supervisor-launch.py', '--stop-orphan']):
+                self.assertEqual(mod.main(), 0)
+            self.assertEqual(fake_fcntl.flock.call_count, 2)
+
+    def test_tunnel_launch_creates_base_directory(self):
+        from unittest.mock import MagicMock, patch
+        mod = self._load('tunnel-launch.py')
+        fake_fcntl = MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing_base = Path(tmp) / 'hue-tunnel'
+            with patch.dict('sys.modules', {'fcntl': fake_fcntl}), \
+                 patch.object(mod, 'fcntl', fake_fcntl), \
+                 patch.object(mod, 'BASE', missing_base), \
+                 patch.object(mod.os, 'open', return_value=10), \
+                 patch.object(mod.os, 'close'), \
+                 patch.object(mod.os, 'dup2'), \
+                 patch.object(mod.os, 'set_inheritable'), \
+                 patch.object(mod.subprocess, 'Popen'):
+                self.assertEqual(mod.main(), 0)
+            self.assertTrue(missing_base.is_dir())

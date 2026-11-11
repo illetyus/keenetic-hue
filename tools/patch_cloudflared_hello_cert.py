@@ -22,6 +22,7 @@ import (
 \t"crypto/tls"
 \t"crypto/x509"
 \t"crypto/x509/pkix"
+\t"math/big"
 \t"net"
 \t"sync"
 \t"time"
@@ -46,8 +47,15 @@ func createHelloCertificate() (tls.Certificate, error) {
 \t\treturn tls.Certificate{}, err
 \t}
 
+\tserialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+\tserialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+\tif err != nil {
+\t\treturn tls.Certificate{}, err
+\t}
+
 \tnow := time.Now()
 \ttemplate := &x509.Certificate{
+\t\tSerialNumber: serialNumber,
 \t\tSubject: pkix.Name{
 \t\t\tCountry:      []string{"US"},
 \t\t\tProvince:     []string{"Texas"},

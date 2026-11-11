@@ -11,7 +11,7 @@ from .events import emit
 
 
 class Controller:
-    def __init__(self, io, journal, session_id=None):
+    def __init__(self, io, journal, session_id=None, probe_interval=30):
         self.io = io
         self.journal = journal
         self.session_id = session_id or str(uuid.uuid4())
@@ -19,21 +19,38 @@ class Controller:
         self.lamp = Lamp(io)
         self.ready = False
         self.waiters = 0
+        self.probe_interval = probe_interval
+
+    def _finish_journal(self, command, result):
+        try:
+            self.journal.finish(command, result)
+        except Exception as error:
+            emit('journal_finish_failed', errorType=type(error).__name__)
 
     async def monitor(self):
         delay = 1
+        last_ok = time.monotonic()
         while True:
             try:
                 if not self.ready or self.io.disconnected:
                     async with self.lock:
                         self.ready = False
-                        await self.io.connect()
-                        await self.lamp.identify()
-                        await self.lamp.read_state(time.monotonic()+5)
+                    await self.io.connect()
+                    await self.lamp.identify()
+                    await self.lamp.read_state(time.monotonic()+5)
+                    async with self.lock:
+                        if self.io.disconnected:
+                            raise ConnectionError('BLE_DISCONNECTED')
                         self.ready = True
-                        delay = 1
-                        emit('ble_ready')
-                await asyncio.sleep(1)
+                    delay = 1
+                    last_ok = time.monotonic()
+                    emit('ble_ready')
+                elif time.monotonic()-last_ok >= self.probe_interval and not self.lock.locked():
+                    async with self.lock:
+                        if self.ready and not self.io.disconnected:
+                            await self.lamp.read_state(time.monotonic()+5)
+                            last_ok = time.monotonic()
+                await asyncio.sleep(min(1, self.probe_interval))
             except asyncio.CancelledError:
                 if asyncio.current_task().cancelling():
                     raise
@@ -77,12 +94,14 @@ class Controller:
                 context.require_current()
             clock=context.clock if context else time.time
             command = Command.parse(data, context.session_id if context else self.session_id, allow_expired=True,clock=clock)
-            cached = self.journal.lookup(command)
+            cached = self.journal.lookup(command, include_pending=False)
             if cached is not None:
                 return cached
             remaining = command.expires_at-clock()
             if remaining <= 0:
                 raise ProtocolError('EXPIRED')
+            if not self.ready:
+                return {'commandId':command.command_id, 'status':'offline', 'errorCode':'BLE_OFFLINE'}
             deadline = time.monotonic()+remaining
             await asyncio.wait_for(self.lock.acquire(), remaining)
             acquired = True
@@ -111,27 +130,27 @@ class Controller:
                 context.require_current()
             result = dict(state, commandId=command.command_id, status='verified')
             if context and context.clock is not time.time:result['observedAt']=context.clock()
-            self.journal.finish(command, result)
+            self._finish_journal(command, result)
             return result
         except ProtocolError as error:
             code = 'OUTCOME_UNKNOWN' if context and context.write_started else error.code
             result = {'commandId':getattr(command, 'command_id', None),
                       'status':'expired' if code == 'EXPIRED' else 'error', 'errorCode':code}
             if reserved:
-                self.journal.finish(command, result)
+                self._finish_journal(command, result)
             return result
         except TimeoutError:
             result = {'commandId':getattr(command, 'command_id', None),
                       'status':'error' if reserved else 'expired',
                       'errorCode':'OUTCOME_UNKNOWN' if reserved else 'EXPIRED'}
             if reserved:
-                self.journal.finish(command, result)
+                self._finish_journal(command, result)
                 self.ready = False
             return result
         except (Exception, asyncio.CancelledError) as error:
             result = {'commandId':getattr(command, 'command_id', None), 'status':'error', 'errorCode':'OUTCOME_UNKNOWN'}
             if reserved:
-                self.journal.finish(command, result)
+                self._finish_journal(command, result)
             self.ready = False
             if isinstance(error, asyncio.CancelledError) and asyncio.current_task().cancelling():
                 raise

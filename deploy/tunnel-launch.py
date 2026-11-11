@@ -10,7 +10,8 @@ SERVICE = '/opt/etc/init.d/S98hue-tunnel'
 
 def main():
     os.umask(0o077)
-    fd = os.open(BASE / 'supervisor.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    BASE.mkdir(mode=0o700, exist_ok=True)
+    fd = os.open(BASE / 'supervisor.lock', os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

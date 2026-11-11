@@ -1,4 +1,4 @@
-import {authorized} from './auth';
+import {authorized,equalSecrets} from './auth';
 import {randomToken,digest} from './oauth-store';
 import type {Outcome} from './oauth-store';
 import type {Env} from './index';
@@ -17,7 +17,8 @@ export async function limitedText(request:Request,max=4096):Promise<string>{
    const part=await Promise.race([reader.read(),new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(Error('invalid_request')),Math.max(0,deadline-Date.now()));})]).finally(()=>{if(timer!==undefined)clearTimeout(timer);});
    const {done,value}=part;if(done)break;size+=value.length;if(size>max)throw Error('invalid_request');chunks.push(value);
  }}catch(error){void reader.cancel().catch(()=>{});throw error;}finally{reader.releaseLock();}
- const all=new Uint8Array(size);let offset=0;for(const c of chunks){all.set(c,offset);offset+=c.length;}return new TextDecoder('utf-8',{fatal:true}).decode(all);
+ const all=new Uint8Array(size);let offset=0;for(const c of chunks){all.set(c,offset);offset+=c.length;}
+ try{return new TextDecoder('utf-8',{fatal:true}).decode(all);}catch{throw Error('invalid_request');}
 }
 function params(raw:string,allowed:string[],required:string[]){
  const p=new URLSearchParams(raw),data:Record<string,string>={};
@@ -51,7 +52,7 @@ export async function oauthRoute(request:Request,env:Env):Promise<Response|null>
    if(request.method!=='POST'||url.search)throw Error('invalid_request');
    const d=await form(request,['client_id','client_secret','grant_type','code','redirect_uri','refresh_token'],['client_id','client_secret','grant_type']);
    if(request.headers.has('Authorization'))throw Error('invalid_request');
-   if(d.client_id!==env.OAUTH_CLIENT_ID||!await authorized(new Request(url,{headers:{Authorization:'Bearer '+d.client_secret}}),env.OAUTH_CLIENT_SECRET))return oauthJson({error:'invalid_client'},401);
+   if(d.client_id!==env.OAUTH_CLIENT_ID||!await equalSecrets(d.client_secret,env.OAUTH_CLIENT_SECRET))return oauthJson({error:'invalid_client'},401);
    if(d.grant_type==='authorization_code'&&(!d.code||!d.redirect_uri||d.refresh_token)||d.grant_type==='refresh_token'&&(!d.refresh_token||d.code||d.redirect_uri))throw Error('invalid_request');
    return oauthJson(unwrap(await auth.exchange(d)));
   }

@@ -49,3 +49,28 @@ class BootstrapTests(unittest.TestCase):
                 self.assertEqual(sys.path[0],str(root/'manager'))
                 cli.main.assert_called_once_with(['update','candidate.huerel'])
             finally:sys.path[:]=before
+
+    def test_help_and_empty_args_survive_missing_or_broken_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'system';(root/'state').mkdir(parents=True)
+            (root/'state/schema.json').write_text('{"schema":1}')
+            cli=Mock();cli.main.return_value=0
+            before=list(sys.path)
+            try:
+                with patch('hue_admin.bootstrap.importlib.import_module',return_value=cli):
+                    self.assertEqual(run(root,['-h']),0)
+                    self.assertEqual(run(root,[]),0)
+                with self.assertRaisesRegex(ValueError,'BOOTSTRAP_SELECTION_MISSING'):
+                    run(root,['status'])
+            finally:sys.path[:]=before
+        with tempfile.TemporaryDirectory() as tmp:
+            root=self.fixture(tmp);(root/'active.json').write_text('{bad')
+            cli=Mock();cli.main.return_value=0
+            before=list(sys.path)
+            try:
+                with patch('hue_admin.bootstrap.importlib.import_module',return_value=cli):
+                    self.assertEqual(run(root,['--help']),0)
+                self.assertEqual(sys.path[0],str(root/'manager'))
+                with self.assertRaises(ValueError):
+                    run(root,['status'])
+            finally:sys.path[:]=before

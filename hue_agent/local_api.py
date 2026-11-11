@@ -90,8 +90,12 @@ class LocalApi:
                 result = await self.controller.query()
                 return ('200 OK' if result['status'] == 'verified' else '503 Service Unavailable'), result
             if method == 'POST' and path == '/v1/commands':
-                length = int(headers.get('content-length', '0'))
-                if not 0 < length <= 4096:
+                if 'content-length' not in headers:
+                    return '411 Length Required', {'errorCode': 'LENGTH_REQUIRED'}
+                length = int(headers['content-length'])
+                if length <= 0:
+                    return '400 Bad Request', {'errorCode': 'INVALID_SIZE'}
+                if length > 4096:
                     return '413 Payload Too Large', {'errorCode': 'INVALID_SIZE'}
                 body = await asyncio.wait_for(reader.readexactly(length), 3)
                 return '200 OK', await self.controller.execute(json.loads(body))

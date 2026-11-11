@@ -4,9 +4,9 @@
 
 **Philips Hue BLE lambanı ayrı bir Hue Bridge veya gelen port açmadan, Keenetic router üzerindeki imzalı ve izole Entware ajanıyla Google Home'a bağla.**
 
-[English (Default)](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC12 Release Notes](docs/releases/0.2.0-rc.12.md) · [Repository Design Research](docs/repository-design.md)
+[English (Default)](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC15 Release Notes](docs/releases/0.2.0-rc.15.md) · [Repository Design Research](docs/repository-design.md)
 
-> **Durum (`v0.2.0-rc.12`):** Belgelenen kişisel donanım profilinde canlı komut, HomeGraph durum bildirimi ve router yeniden başlatma (reboot) kabulünü geçmiş aday sürüm. Evrensel bir Hue Bridge ikamesi veya Google sertifikalı ticari ürün değildir; farklı donanımlar ve sıfırdan açılan Google/Cloudflare hesapları ayrı doğrulama gerektirir.
+> **Durum (`v0.2.0-rc.15`):** Belgelenen kişisel donanım profilinde canlı `huectl status --json` ve `huectl health --live --json` kabulünü geçmiş aday sürüm (`healthy: true`, 10 Kasım 2026 etkinleştirmesinden bu yana sıfır çökme/beklenmedik yeniden başlatma). Evrensel bir Hue Bridge ikamesi veya Google sertifikalı ticari ürün değildir; farklı donanımlar ve sıfırdan açılan Google/Cloudflare hesapları ayrı doğrulama gerektirir. `0.2.0-rc.15` sonrası [CHANGELOG](CHANGELOG.md) altındaki `Unreleased` değişiklikleri yalnızca yerelde çevrimdışı testlerle doğrulanmıştır.
 
 ---
 
@@ -65,7 +65,7 @@ Depodaki her temel yetenek doğrudan ilgili modüle ve taşınabilir doğrulama 
 
 ### 1. Ön Koşullar (Pre-installation)
 - Keenetic üzerinde `ext4` biçimli USB depolama, çalışan Entware ortamı ve [`requirements-router.lock.json`](requirements-router.lock.json) içindeki bağımlılıklar ([hazırlık adımları](docs/reinstall.md)).
-- İmzalı `keenetic-hue-0.2.0-rc.12.huerel` paketi, bağımsız doğrulanmış [`keys/release-trust.pub`](keys/release-trust.pub) açık anahtarı (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`) ve [`deploy/install_release.py`](deploy/install_release.py) kurucusu.
+- İmzalı `keenetic-hue-0.2.0-rc.15.huerel` paketi, bağımsız doğrulanmış [`keys/release-trust.pub`](keys/release-trust.pub) açık anahtarı (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`) ve [`deploy/install_release.py`](deploy/install_release.py) kurucusu.
 
 ### 2. İmzalı Kurulum ve Yapılandırma (Installation)
 - **Boş Entware ortamına imzalı paketi doğrulayarak kurmak için:** [Installation](docs/installation.md) kılavuzundaki `sha256sum -c` + `python3 -I install_release.py` komutunu çalıştır.
@@ -86,7 +86,7 @@ Sağlıklı ve sürüm sahipliği doğrulanmış bir kurulum aşağıdaki yapıd
 {
   "schemaVersion": 1,
   "healthy": true,
-  "releaseId": "0.2.0-rc.12",
+  "releaseId": "0.2.0-rc.15",
   "components": {
     "agent":     { "state": "running", "reason": "OWNED_VERSION" },
     "tunnel":    { "state": "ready",   "reason": "TUNNEL_READY" },
@@ -126,5 +126,7 @@ python tools/check_publication.py
 python tools/run_portable_tests.py
 cd cloud && npm run typecheck && npm test
 ```
+
+> Taşınabilir testler (native Linux/POSIX/root kontrollerini içeren toplam 562 Python testi içinden 91 taşınabilir Python testi ve 70 Cloudflare Worker testi) protokol ile durum makinesi sözleşmelerini doğrular; fiziksel BLE radyo ve router kabulünün yerini almaz (`0.2.0-rc.15` sonrası `Unreleased` değişiklikleri yalnızca yerelde test edilmiştir).
 
 [Security Policy](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Support](SUPPORT.md) · [Repository Design Research](docs/repository-design.md) · [MIT License](LICENSE) · [Third-Party Notices](THIRD_PARTY_NOTICES.md)

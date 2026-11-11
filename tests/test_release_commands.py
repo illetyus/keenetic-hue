@@ -31,6 +31,7 @@ class ReleaseCommandTests(unittest.TestCase):
             with patch('hue_admin.release_commands.management_lock',return_value=nullcontext()),patch('hue_admin.release_commands.runtime_for',return_value=runtime):
                 result=execute('update',str(Path(tmp)/'0.2.0.huerel'),root=root,service=service,health=health)
             self.assertTrue(result['activated']);self.assertEqual(fixture.current(root),'0.2.0')
+            self.assertTrue(result['bootstrapSyncRequired'])
             self.assertEqual(events,[('tunnel','stop'),('agent','stop'),('agent','start'),('tunnel','start')])
 
     def test_unconfigured_boot_never_touches_legacy_services(self):

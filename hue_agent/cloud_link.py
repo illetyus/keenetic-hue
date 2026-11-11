@@ -44,7 +44,6 @@ class CloudLink:
         self.stopped = asyncio.Event()
         self.socket = None
         self.current = None
-        self.tasks = set()
         self.ready_since = None
 
     async def close(self):
@@ -92,12 +91,13 @@ class CloudLink:
                 while True:
                     await asyncio.sleep(HEARTBEAT_SECONDS)
                     pong.clear()
-                    await ws.send('ping')
                     try:
+                        await ws.send('ping')
                         await asyncio.wait_for(pong.wait(), PONG_SECONDS)
-                    except TimeoutError:
+                    except Exception:
                         live['live'] = False
-                        await ws.close()
+                        with contextlib.suppress(Exception):
+                            await ws.close()
                         return
             heartbeat = asyncio.create_task(heartbeats())
 
@@ -137,7 +137,7 @@ class CloudLink:
             live['live'] = False
             if heartbeat is not None:
                 heartbeat.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await heartbeat
             if jobs:
                 # Give bounded GATT operations a chance to observe invalidation.

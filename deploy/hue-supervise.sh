@@ -37,6 +37,13 @@ log_event() {
     fi
     return 0
 }
+uptime_seconds() {
+    if read up_val up_rest < /proc/uptime 2>/dev/null; then
+        printf '%s\n' "${up_val%%.*}"
+    else
+        date +%s
+    fi
+}
 finish() {
     result=$1
     trap - 0
@@ -47,7 +54,20 @@ cleanup() {
     exit_signal=$1; exit_reason="OBSERVED_$1"
     log_event supervisor_signal "$exit_reason" 0 "$exit_signal"
     if [ -n "$sleeper" ]; then kill -TERM "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null; fi
-    if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi
+    if [ -n "$child" ]; then
+        kill -TERM "$child" 2>/dev/null
+        (
+            eval "exec $ownerfd>&-" 2>/dev/null || :
+            spid=''
+            trap 'if [ -n "$spid" ]; then kill -TERM "$spid" 2>/dev/null; wait "$spid" 2>/dev/null; fi; exit 0' USR1
+            sleep 15 & spid=$!
+            wait "$spid" && kill -KILL "$child" 2>/dev/null
+        ) >/dev/null 2>&1 &
+        killer=$!
+        wait "$child" 2>/dev/null
+        kill -USR1 "$killer" 2>/dev/null
+        wait "$killer" 2>/dev/null
+    fi
     rm -f "$CHILDPID" "$CHILDIDENTITY"
     exit 0
 }
@@ -57,14 +77,15 @@ trap 'cleanup INT' INT
 log_event supervisor_start OK 0 ''
 delay=2
 while :; do
-    started=$(date +%s)
+    started=$(uptime_seconds)
     bootstrap="$ROOT/logs/$component-bootstrap.log"
     [ ! -f "$bootstrap" ] || mv "$bootstrap" "$bootstrap.previous"
     "$HUE_PYTHON" -I "$ROOT/releases/$release/service/component-child.py" "$component" "$ROOT" "$release" "$ownerfd" </dev/null >>"$bootstrap" 2>&1 &
     child=$!; echo "$child" > "$CHILDPID.new-$$"; mv "$CHILDPID.new-$$" "$CHILDPID"
     wait "$child"; result=$?; child=''; rm -f "$CHILDPID" "$CHILDIDENTITY"
-    if [ $(($(date +%s)-started)) -ge 60 ]; then delay=2; fi
+    now_sec=$(uptime_seconds)
+    if [ $((now_sec-started)) -ge 60 ]; then delay=2; fi
     log_event child_exit CHILD_EXIT "$result"
-    sleep "$delay" & sleeper=$!; wait "$sleeper"; sleeper=''
+    ( eval "exec $ownerfd>&-" 2>/dev/null && exec sleep "$delay" ) & sleeper=$!; wait "$sleeper"; sleeper=''
     delay=$((delay*2)); [ "$delay" -le 30 ] || delay=30
 done
