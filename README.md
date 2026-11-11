@@ -4,9 +4,9 @@
 
 **Control a Philips Hue BLE lamp from Google Home through your Keenetic router—without a Hue Bridge and without opening inbound ports.**
 
-[Türkçe özet](README.tr.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC15 Release Notes](docs/releases/0.2.0-rc.15.md) · [Repository Design Research](docs/repository-design.md)
+[Türkçe özet](README.tr.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC16 Release Notes](docs/releases/0.2.0-rc.16.md) · [Repository Design Research](docs/repository-design.md)
 
-> **Status (`v0.2.0-rc.15`):** Release candidate that passed live `huectl status --json` and `huectl health --live --json` acceptance on the documented personal hardware profile (`healthy: true`, zero crashes or unexpected restarts since activation on 10 November 2026). This is a personal systems integration—not a Google-certified commercial product or a universal Hue Bridge replacement. Different hardware and fresh Google/Cloudflare accounts require independent validation; post-`rc.15` changes under `Unreleased` in [CHANGELOG](CHANGELOG.md) are verified by local offline tests only.
+> **Status (`v0.2.0-rc.16`):** Release candidate that passed live `huectl status --json` and `huectl health --live --json` acceptance (`healthy: true`, `bootstrapInSync: true`) on the documented personal hardware profile on 11 November 2026. This is a personal systems integration—not a Google-certified commercial product or a universal Hue Bridge replacement. Different hardware and fresh Google/Cloudflare accounts require independent validation.
 
 ---
 
@@ -67,7 +67,7 @@ Every core capability and security boundary in the repository maps directly to i
 
 ### 1. Pre-installation
 - Prepare `ext4` USB storage on the Keenetic router, a working Entware environment, and the pinned dependencies in [`requirements-router.lock.json`](requirements-router.lock.json) ([preparation steps](docs/reinstall.md#2-preparing-entware)).
-- Obtain the signed `keenetic-hue-0.2.0-rc.15.huerel` bundle, the independently verified [`keys/release-trust.pub`](keys/release-trust.pub) public key (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`), and the standalone [`deploy/install_release.py`](deploy/install_release.py) installer.
+- Obtain the signed `keenetic-hue-0.2.0-rc.16.huerel` bundle, the independently verified [`keys/release-trust.pub`](keys/release-trust.pub) public key (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`), and the standalone [`deploy/install_release.py`](deploy/install_release.py) installer.
 
 ### 2. Signed Installation & Configuration
 - **Fresh signed installation on Entware:** Follow [Installation & file layout](docs/installation.md) (`sha256sum -c` + `python3 -I install_release.py`).
@@ -88,7 +88,7 @@ Expected sanitized output when both dedicated service principals, the local API,
 {
   "schemaVersion": 1,
   "healthy": true,
-  "releaseId": "0.2.0-rc.15",
+  "releaseId": "0.2.0-rc.16",
   "components": {
     "agent":     { "state": "running", "reason": "OWNED_VERSION" },
     "tunnel":    { "state": "ready",   "reason": "TUNNEL_READY" },
@@ -131,7 +131,7 @@ python tools/run_portable_tests.py
 cd cloud && npm run typecheck && npm test
 ```
 
-> Portable tests (91 portable Python tests out of 562 total Python tests including native Linux/POSIX/root checks, plus 70 Cloudflare Worker tests) verify protocol and state-machine contracts; they do not replace physical BLE radio and router acceptance (and post-`rc.15` `Unreleased` changes remain locally verified only). See [Contributing](CONTRIBUTING.md) and [Changelog](CHANGELOG.md).
+> Portable tests (91 portable Python tests out of 562 total Python tests including native Linux/POSIX/root checks, plus 70 Cloudflare Worker tests) verify protocol and state-machine contracts; they do not replace physical BLE radio, router, and live Cloudflare Worker/HomeGraph acceptance. See [Contributing](CONTRIBUTING.md) and [Changelog](CHANGELOG.md).
 
 Never include tokens, private keys, BLE bonds, setup codes, or `.huebak` archives in bug reports.  
 [Security Policy](SECURITY.md) · [Support](SUPPORT.md) · [Repository Design Research](docs/repository-design.md) · [Türkçe Özet](README.tr.md)

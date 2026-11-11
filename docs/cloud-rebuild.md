@@ -41,7 +41,7 @@ values into JSONC files. Use the locked Wrangler version in `package-lock.json`.
 
 In the Cloudflare dashboard, navigate to **Workers VPC → Tunnels → Create** to
 create a Tunnel. On the Keenetic router, always use the verified MIPS `cloudflared`
-binary shipped inside the signed RC15 release bundle—never run generic architecture
+binary shipped inside the signed RC16 release bundle—never run generic architecture
 install commands from the dashboard on the router. Store the Tunnel token in your
 password manager and copy it via SFTP as a `0600` root-owned file to
 `/opt/var/lib/keenetic-hue-system/secrets/tunnel.token`, then run

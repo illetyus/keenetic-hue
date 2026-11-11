@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-rc.16 — 2026-11-11
 
-Post-`0.2.0-rc.15` uncommitted hardening across `hue_admin/`, `hue_agent/`,
-`cloud/`, `deploy/`, and `tools/` (not part of the signed `0.2.0-rc.15` payload;
-verified locally with 91 portable Python tests out of 562 total Python tests
-including native Linux/POSIX/root checks, plus 70 Cloudflare Worker tests—no live
-router acceptance yet):
+Code commit `311c46e`. Hardening across `hue_agent/`, `hue_admin/`, `cloud/`,
+`deploy/`, and `tools/`, locally verified with 91 portable Python tests (out of
+562 total Python tests including native Linux/POSIX/root checks), 70 Cloudflare
+Worker Vitest tests, TypeScript checking, and live router acceptance on
+`keenetic-hue-0.2.0-rc.16.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.16"`). Live Cloudflare Worker deployment requires separate
+`wrangler login` and `wrangler.personal.jsonc` deployment.
+[Release notes](docs/releases/0.2.0-rc.16.md).
 
 - Help/empty CLI invocation bypasses the management lock cleanly in `admission.py`
   and `bootstrap.py`; `deploy/huectl-entry.py` reports `KeyboardInterrupt` cleanly
