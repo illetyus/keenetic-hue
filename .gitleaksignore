@@ -1,0 +1,3 @@
+# Reviewed Gitleaks false-positive fingerprints. These are marker strings only.
+f2fb8baf44a998843d0278a1306d643f8f8af7bd:deploy/build_release.py:private-key:13
+f2fb8baf44a998843d0278a1306d643f8f8af7bd:deploy/build_release.py:private-key:16
