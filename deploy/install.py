@@ -53,6 +53,23 @@ def load_snapshot(stage, expected_digest):
     return snapshot
 
 
+def _write_private(path, data, mode=0o600):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+    fd = os.open(path, flags, mode)
+    try:
+        if hasattr(os, 'fchmod'):
+            try:
+                os.fchmod(fd, mode)
+            except OSError:
+                pass
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            view = view[written:]
+    finally:
+        os.close(fd)
+
+
 def install_snapshot(snapshot, target, startup):
     acceptance = json.loads(snapshot['acceptance-passed.json'])
     if not acceptance.get('restored') or acceptance['controls'] != 50 or acceptance['queries'] != 50 or acceptance['reconnections'] != 5:
@@ -72,12 +89,14 @@ def install_snapshot(snapshot, target, startup):
         if name.startswith('hue_agent/'):
             destination = app/name
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            destination.write_bytes(data)
-    (app/'launch.py').write_bytes(snapshot['deploy/launch.py'])
-    (target/'api.token').write_bytes(snapshot['api.token'])
-    (target/'config.json').write_text(json.dumps(config, indent=2))
-    with startup.open('xb') as init_file:
-        init_file.write(snapshot['deploy/S99hue-agent'])
+            _write_private(destination, data)
+        elif name == 'deploy/launch.py':
+            _write_private(app/'launch.py', data)
+        elif name == 'deploy/S99hue-agent':
+            _write_private(startup, data, 0o755)
+        elif name not in ('acceptance-passed.json', 'config.json', 'deploy/install.py'):
+            _write_private(target/name, data)
+    _write_private(target/'config.json', json.dumps(config, indent=2).encode())
     startup.chmod(0o755)
 
 

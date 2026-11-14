@@ -188,10 +188,6 @@ def main(argv=None):
                 with warnings.catch_warnings():
                     warnings.simplefilter('error',GetPassWarning)
                     password=getpass('Yedek parolasi: ')
-                    if args.action=='backup' and password=='?':
-                        import secrets
-                        password=secrets.token_urlsafe(24)
-                        print('Uretilen parola (saklayin): '+password,file=sys.stderr)
                     if not password:raise ValueError('EMPTY_PASSWORD')
                     if args.action=='backup' and password!=getpass('Parolayi tekrar girin: '):
                         raise ValueError('PASSWORD_MISMATCH')

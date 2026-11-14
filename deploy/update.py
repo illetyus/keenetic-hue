@@ -8,16 +8,49 @@ from pathlib import Path
 import re
 
 
-def load_trusted_snapshot(installer, installer_digest, stage, manifest_digest):
+def _write_private(path,data,mode=0o600):
+    flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_BINARY',0)
+    fd=os.open(path,flags,mode)
+    try:
+        if hasattr(os,'fchmod'):
+            try:os.fchmod(fd,mode)
+            except OSError:pass
+        view=memoryview(data)
+        while view:
+            written=os.write(fd,view)
+            view=view[written:]
+    finally:
+        os.close(fd)
+
+
+def _replace_private(path,data,mode=0o600):
+    flags=os.O_WRONLY|os.O_CREAT|os.O_TRUNC|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_BINARY',0)
+    fd=os.open(path,flags,mode)
+    try:
+        if hasattr(os,'fchmod'):
+            try:os.fchmod(fd,mode)
+            except OSError:pass
+        view=memoryview(data)
+        while view:
+            written=os.write(fd,view)
+            view=view[written:]
+    finally:
+        os.close(fd)
+
+
+def load_verified_snapshot(installer, installer_digest, stage, manifest_digest):
     installer=Path(installer)
     if installer.is_symlink() or not re.fullmatch('[0-9a-f]{64}',installer_digest):
         raise ValueError('Invalid installer digest or path')
     source=installer.read_bytes()
     if not hmac.compare_digest(hashlib.sha256(source).hexdigest(),installer_digest):
         raise ValueError('Trusted installer digest mismatch')
-    scope={'__name__':'trusted_installer','__file__':str(installer)}
+    scope={'__name__':'verified_installer','__file__':str(installer)}
     exec(compile(source,str(installer),'exec'),scope)
     return scope['load_snapshot'](Path(stage),manifest_digest)
+
+
+load_trusted_snapshot=load_verified_snapshot
 
 
 def apply_snapshot(snapshot,target,config,tag):
@@ -46,11 +79,11 @@ def apply_snapshot(snapshot,target,config,tag):
         if '..' in rel.parts or rel.is_absolute() or rel.suffix!='.py':raise ValueError('Unsafe application path')
         path=candidate/rel
         path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-        with path.open('xb') as file:file.write(data)
-    with (candidate/'launch.py').open('xb') as file:file.write(snapshot['deploy/launch.py'])
+        _write_private(path,data)
+    _write_private(candidate/'launch.py',snapshot['deploy/launch.py'])
     old_config=cfg.read_bytes()
-    (backup/'config.json').write_bytes(old_config)
-    with temporary.open('xb') as file:file.write(json.dumps(config,indent=2).encode())
+    _write_private(backup/'config.json',old_config)
+    _write_private(temporary,json.dumps(config,indent=2).encode())
     moved=False
     try:
         app.rename(backup/'app')
@@ -61,7 +94,7 @@ def apply_snapshot(snapshot,target,config,tag):
         if moved:
             if app.exists():app.rename(backup/'failed-app')
             (backup/'app').rename(app)
-            cfg.write_bytes(old_config)
+            _replace_private(cfg,old_config)
         raise
     return backup
 
@@ -69,7 +102,7 @@ def apply_snapshot(snapshot,target,config,tag):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage',type=Path,required=True)
-    parser.add_argument('--trusted-installer',type=Path,required=True)
+    parser.add_argument('--trusted-installer',dest='installer_path',type=Path,required=True)
     parser.add_argument('--installer-sha256',required=True)
     parser.add_argument('--manifest-sha256',required=True)
     parser.add_argument('--target',type=Path,default=Path('/opt/var/lib/hue-agent'))
@@ -78,7 +111,7 @@ def main():
     os.umask(0o077)
     if args.target.resolve()!=Path('/opt/var/lib/hue-agent'):
         raise SystemExit('Unexpected production update target')
-    snapshot=load_trusted_snapshot(args.trusted_installer,args.installer_sha256,args.stage,args.manifest_sha256)
+    snapshot=load_verified_snapshot(args.installer_path,args.installer_sha256,args.stage,args.manifest_sha256)
     cfg_path=args.target/'config.json'
     if cfg_path.is_symlink() or cfg_path.stat().st_mode&0o077:
         raise SystemExit('Private current config required')

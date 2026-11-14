@@ -7,13 +7,18 @@ from hue_admin.cli import main
 
 
 class AdminCliTests(unittest.TestCase):
-    def test_generated_backup_password_is_terminal_only_and_confirmed(self):
-        password='fixture-generated-password-1234'
-        with patch('hue_admin.cli.sys.stdin.isatty',return_value=True),patch('hue_admin.cli.sys.stderr',new_callable=io.StringIO) as out,patch('hue_admin.cli.getpass',side_effect=['?',password]),patch('secrets.token_urlsafe',return_value=password),patch('hue_admin.cli.archive_action',return_value={'created':True}) as action:
+    def test_backup_password_is_confirmed_and_never_echoed(self):
+        password='fixture-backup-password-1234'
+        with patch('hue_admin.cli.sys.stdin.isatty',return_value=True),patch('hue_admin.cli.sys.stderr',new_callable=io.StringIO) as out,patch('hue_admin.cli.getpass',side_effect=[password,password]),patch('hue_admin.cli.archive_action',return_value={'created':True}) as action:
             out.isatty=lambda:True
             self.assertEqual(main(['backup','/private/backup.huebak']),0)
-            self.assertIn(password,out.getvalue())
+            self.assertNotIn(password,out.getvalue())
             action.assert_called_once_with('backup','/private/backup.huebak',password,False,False)
+        with patch('hue_admin.cli.sys.stdin.isatty',return_value=True),patch('hue_admin.cli.sys.stderr',new_callable=io.StringIO) as out,patch('hue_admin.cli.getpass',side_effect=['?',password]),patch('hue_admin.cli.archive_action') as action:
+            out.isatty=lambda:True
+            self.assertEqual(main(['backup','/private/backup.huebak']),1)
+            self.assertIn('BACKUP_OR_RESTORE_FAILED',out.getvalue())
+            action.assert_not_called()
     def setUp(self):
         guard=patch('hue_admin.cli.lifecycle_guard',return_value=nullcontext());guard.start();self.addCleanup(guard.stop)
         unified=patch('hue_admin.cli.is_unified',return_value=False);unified.start();self.addCleanup(unified.stop)
