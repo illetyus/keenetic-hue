@@ -3,6 +3,7 @@ import json
 import hashlib
 from pathlib import Path
 import re
+import shutil
 
 from .installation import install_lock, slot_verified
 from .manifest import unique_object
@@ -118,6 +119,53 @@ def recover_activation(root,key,runtime,stop,start):
     return {'recoveryComplete':True}
 
 
+def prune_obsolete_releases(root):
+    try:
+        from .installation import installation_receipt
+        from .bootstrap_install import bootstrap_receipt
+        from .runtime_repair import receipt as runtime_receipt
+        root=Path(root).absolute()
+        current=pointer(root);activation=receipt(root)
+        if current is None or activation is None or activation['phase']!='committed':return
+        install=installation_receipt(root)
+        if install is not None and install['phase']!='committed':return
+        bootstrap=bootstrap_receipt(root)
+        if bootstrap is not None and bootstrap['phase']!='committed':return
+        runtime=runtime_receipt(root)
+        if runtime is not None and runtime['phase']!='committed':return
+        protected={current['releaseId'],current.get('previousReleaseId'),activation['newReleaseId']}
+        before=activation['before']
+        if isinstance(before,dict):
+            protected.update((before.get('releaseId'),before.get('previousReleaseId')))
+        if install is not None:protected.add(install['releaseId'])
+        if bootstrap is not None:protected.add(bootstrap['releaseId'])
+        if runtime is not None:protected.add(runtime['releaseId'])
+        run_dir=root/'run'
+        if run_dir.is_symlink():return
+        if run_dir.is_dir():
+            for name in ('agent-supervisor.json','tunnel-supervisor.json','agent-child.json','tunnel-child.json'):
+                path=run_dir/name
+                if path.is_symlink():return
+                if path.exists():
+                    data=json.loads(read_private_bytes(path,4096),object_pairs_hook=unique_object)
+                    if isinstance(data,dict) and valid_id(data.get('releaseId')):
+                        protected.add(data['releaseId'])
+        protected.discard(None)
+        if not protected or root.is_symlink():return
+        runtime_base=root.with_name(root.name+'-runtime')
+        agent_dir=runtime_base/'agent'
+        parents=[root/'releases']
+        if not runtime_base.is_symlink():
+            parents.append(runtime_base/'bin')
+            if not agent_dir.is_symlink():parents.append(agent_dir/'code')
+        for parent in parents:
+            if parent.is_symlink() or not parent.is_dir():continue
+            for entry in parent.iterdir():
+                if not entry.is_symlink() and entry.is_dir() and valid_id(entry.name) and entry.name not in protected:
+                    shutil.rmtree(entry,ignore_errors=True)
+    except Exception:pass
+
+
 def activate_candidate(root,release_id,key,runtime,stop,start,health,failpoint=lambda phase:None,expected_current=None):
     root=Path(root).absolute()
     with install_lock(root):
@@ -155,6 +203,7 @@ def activate_candidate(root,release_id,key,runtime,stop,start,health,failpoint=l
             release_order(root,candidate_raw,key,runtime,True)
         except Exception:
             _recover(root,key,runtime,stop,start);raise
+        prune_obsolete_releases(root)
     return {'activated':True,'releaseId':release_id,'versionHealthVerified':True}
 
 

@@ -30,6 +30,8 @@ class Controller:
     async def monitor(self):
         delay = 1
         last_ok = time.monotonic()
+        failures = 0
+        last_error = None
         while True:
             try:
                 if not self.ready or self.io.disconnected:
@@ -42,9 +44,12 @@ class Controller:
                         if self.io.disconnected:
                             raise ConnectionError('BLE_DISCONNECTED')
                         self.ready = True
+                    prior_failures = failures
                     delay = 1
+                    failures = 0
+                    last_error = None
                     last_ok = time.monotonic()
-                    emit('ble_ready')
+                    emit('ble_ready', **({'recoveredAfter': prior_failures} if prior_failures else {}))
                 elif time.monotonic()-last_ok >= self.probe_interval and not self.lock.locked():
                     async with self.lock:
                         if self.ready and not self.io.disconnected:
@@ -59,7 +64,11 @@ class Controller:
                 delay = min(30, delay*2)
             except Exception as error:
                 self.ready = False
-                emit('ble_retry', errorType=type(error).__name__, retrySeconds=delay)
+                error_name = type(error).__name__
+                failures += 1
+                if failures <= 6 or error_name != last_error or failures % 80 == 0:
+                    emit('ble_retry', errorType=error_name, retrySeconds=delay, **({'attempts': failures} if failures > 6 else {}))
+                last_error = error_name
                 await asyncio.sleep(delay+random.uniform(0, 0.2))
                 delay = min(30, delay*2)
 

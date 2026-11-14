@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import runpy
 import sys
@@ -64,6 +65,48 @@ class ComponentChildTests(unittest.TestCase):
             self.assertEqual(len(events),1)
             self.assertEqual(events[0][2],[sys.executable,'-u','-m','hue_agent','--config',str(root/'config/agent.json')])
 
+    def _run_tunnel(self, root, release, paths, *, drop=None, execute=None):
+        events = []
+        stdio = []
+        real_open = os.open
+        def default_drop(uid, gid):
+            events.append(('drop', uid, gid))
+        def default_exec(binary, args, env):
+            events.append(('exec', binary, args, env)); raise Executed()
+        def fake_open(path, flags, *a, **kw):
+            if path == os.devnull:
+                stdio.append(('open', path, flags))
+                return 99
+            return real_open(path, flags, *a, **kw)
+        def fake_close(fd):
+            if fd in (98, 99):
+                stdio.append(('close', fd))
+        old_path = sys.path[:]
+        try:
+            with ExitStack() as stack:
+                for name, value in (
+                    ('sys.argv', [str(self.script), 'tunnel', str(root), release, '123']),
+                    ('os.open', fake_open),
+                    ('os.close', fake_close),
+                    ('os.dup', lambda fd: stdio.append(('dup', fd)) or 98),
+                    ('os.dup2', lambda old, new: stdio.append(('dup2', old, new))),
+                    ('os.umask', lambda mode: None),
+                    ('os.chdir', lambda path: None),
+                    ('os.execve', execute or default_exec),
+                    ('hue_admin.runtime_policy.release_policy', lambda *a: {'agent': 'dedicated', 'tunnel': 'dedicated'}),
+                    ('hue_admin.service_manager.environment', lambda *a: {'SSL_CERT_FILE': '/opt/etc/ssl/cert.pem'}),
+                    ('hue_admin.account_store.ensure_accounts', lambda *a: None),
+                    ('hue_admin.privileges.prepare_tunnel_runtime', lambda *a: ({'uid': 61000, 'gid': 61000}, paths)),
+                    ('hue_admin.privileges.drop_identity', drop or default_drop),
+                    ('hue_admin.privileges.tunnel_environment', lambda d, ca: {'HOME': str(d), 'SSL_CERT_FILE': ca}),
+                    ('hue_admin.privileges.tunnel_arguments', lambda t, l: ['run', '--logfile', str(l)])):
+                    stack.enter_context(patch(name, value))
+                with self.assertRaises(Executed):
+                    runpy.run_path(str(self.script), run_name='__main__')
+        finally:
+            sys.path[:] = old_path
+        return events, stdio
+
     def test_tunnel_rotates_oversized_log_after_identity_drop_without_following_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);release='0.2.0-rc.6'
@@ -73,43 +116,29 @@ class ComponentChildTests(unittest.TestCase):
             events=[]
             def drop(uid,gid):events.append(('drop',uid,gid,log.exists()))
             def execute(binary,args,env):events.append(('exec',binary,args,env,log.exists()));raise Executed()
-            old_path=sys.path[:]
-            try:
-                with ExitStack() as stack:
-                    for name,value in (
-                        ('sys.argv',[str(self.script),'tunnel',str(root),release,'123']),
-                        ('os.close',lambda fd:None),('os.umask',lambda mode:None),('os.chdir',lambda path:None),
-                        ('os.execve',execute),
-                        ('hue_admin.runtime_policy.release_policy',lambda *a:{'agent':'dedicated','tunnel':'dedicated'}),
-                        ('hue_admin.service_manager.environment',lambda *a:{'SSL_CERT_FILE':'/opt/etc/ssl/cert.pem'}),
-                        ('hue_admin.account_store.ensure_accounts',lambda *a:None),
-                        ('hue_admin.privileges.prepare_tunnel_runtime',lambda *a:({'uid':61000,'gid':61000},paths)),
-                        ('hue_admin.privileges.drop_identity',drop),
-                        ('hue_admin.privileges.tunnel_environment',lambda d,ca:{'HOME':str(d),'SSL_CERT_FILE':ca}),
-                        ('hue_admin.privileges.tunnel_arguments',lambda t,l:['run','--logfile',str(l)])):
-                        stack.enter_context(patch(name,value))
-                    with self.assertRaises(Executed):runpy.run_path(str(self.script),run_name='__main__')
-            finally:sys.path[:]=old_path
+            _,stdio=self._run_tunnel(root,release,paths,drop=drop,execute=execute)
             self.assertEqual(events[0],('drop',61000,61000,True))
+            self.assertEqual(stdio,[
+                ('dup',2),
+                ('open',os.devnull,os.O_WRONLY),
+                ('dup2',99,1),
+                ('dup2',99,2),
+                ('close',99),
+                ('dup2',98,2),
+                ('close',98),
+            ])
             self.assertFalse(log.exists())
             self.assertEqual((data/'tunnel.log.previous').read_bytes(),b'x'*131072)
             with patch.object(Path,'is_symlink',new=lambda self:self==log):
                 log.write_bytes(b'y'*131072)
-                old_path=sys.path[:]
-                try:
-                    with ExitStack() as stack:
-                        for name,value in (
-                            ('sys.argv',[str(self.script),'tunnel',str(root),release,'123']),
-                            ('os.close',lambda fd:None),('os.umask',lambda mode:None),('os.chdir',lambda path:None),
-                            ('os.execve',execute),
-                            ('hue_admin.runtime_policy.release_policy',lambda *a:{'agent':'dedicated','tunnel':'dedicated'}),
-                            ('hue_admin.service_manager.environment',lambda *a:{'SSL_CERT_FILE':'/opt/etc/ssl/cert.pem'}),
-                            ('hue_admin.account_store.ensure_accounts',lambda *a:None),
-                            ('hue_admin.privileges.prepare_tunnel_runtime',lambda *a:({'uid':61000,'gid':61000},paths)),
-                            ('hue_admin.privileges.drop_identity',drop),
-                            ('hue_admin.privileges.tunnel_environment',lambda d,ca:{'HOME':str(d),'SSL_CERT_FILE':ca}),
-                            ('hue_admin.privileges.tunnel_arguments',lambda t,l:['run','--logfile',str(l)])):
-                            stack.enter_context(patch(name,value))
-                        with self.assertRaises(Executed):runpy.run_path(str(self.script),run_name='__main__')
-                finally:sys.path[:]=old_path
+                self._run_tunnel(root,release,paths,drop=drop,execute=execute)
                 self.assertEqual(log.read_bytes(),b'y'*131072)
+
+    def test_tunnel_redirects_stdio_to_devnull_before_exec_and_restores_stderr_on_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);release='0.2.0-rc.17'
+            data=root/'data';data.mkdir()
+            paths={'binary':root/'cloudflared','token':root/'tunnel.token','data':data,'log':data/'tunnel.log'}
+            _,stdio=self._run_tunnel(root,release,paths)
+            self.assertEqual(stdio[:5],[('dup',2),('open',os.devnull,os.O_WRONLY),('dup2',99,1),('dup2',99,2),('close',99)])
+            self.assertEqual(stdio[-2:],[('dup2',98,2),('close',98)])

@@ -333,3 +333,46 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('413 Payload Too Large', oversized)
         finally:
             await api.close()
+
+    async def test_monitor_coalesces_repeated_ble_retry_and_reports_recovery_count(self):
+        self.io.disconnected = True
+        self.agent.ready = False
+        calls = 0
+        emitted = []
+        ready_event = asyncio.Event()
+        real_sleep = asyncio.sleep
+
+        async def fast_sleep(_):
+            await real_sleep(0)
+
+        async def connect():
+            nonlocal calls
+            calls += 1
+            if calls <= 85:
+                raise TimeoutError('offline')
+            if calls == 86:
+                raise ConnectionError('changed')
+            self.io.disconnected = False
+
+        def record_emit(event, **fields):
+            emitted.append((event, fields))
+            if event == 'ble_ready':
+                ready_event.set()
+
+        self.io.connect = connect
+        with patch('hue_agent.agent.emit', side_effect=record_emit), patch('hue_agent.agent.asyncio.sleep', side_effect=fast_sleep):
+            task = asyncio.create_task(self.agent.monitor())
+            try:
+                await asyncio.wait_for(ready_event.wait(), 2)
+            finally:
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+        retries = [(e, f) for e, f in emitted if e == 'ble_retry']
+        readies = [(e, f) for e, f in emitted if e == 'ble_ready']
+        self.assertEqual(len(retries), 8)
+        self.assertTrue(all('attempts' not in f for _, f in retries[:6]))
+        self.assertEqual([f['retrySeconds'] for _, f in retries[:6]], [1, 2, 4, 8, 16, 30])
+        self.assertEqual(retries[6][1], {'errorType': 'TimeoutError', 'retrySeconds': 30, 'attempts': 80})
+        self.assertEqual(retries[7][1], {'errorType': 'ConnectionError', 'retrySeconds': 30, 'attempts': 86})
+        self.assertEqual(readies, [('ble_ready', {'recoveredAfter': 86})])

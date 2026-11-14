@@ -97,6 +97,9 @@ class BootstrapInstallTests(unittest.TestCase):
             provision_bootstrap(root,'0.2.2',pub,runtime,cli,init,replace_entries=False)
             self.assertEqual(cli.read_bytes(),b'#!/bin/sh\necho v2\n')
             self.assertEqual(list(root.glob('.bootstrap-stage-*')),[])
+            from hue_admin.bootstrap_install import bootstrap_receipt
+            self.assertEqual(len(list((root/'backups').glob('bootstrap-*'))),2)
+            self.assertTrue((root/bootstrap_receipt(root)['backup']).is_dir())
 
     def test_finish_if_needed_normalizes_relative_entry_paths(self):
         import os

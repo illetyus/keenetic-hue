@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import uuid
 
 from .activation import verify_slot
@@ -168,7 +169,28 @@ def provision_bootstrap(root,release_id,key,runtime,cli_path,init_path,failpoint
             if not leftover.is_symlink() and leftover.is_dir() and re.fullmatch(r'\.bootstrap-stage-[a-f0-9]{32}',leftover.name):
                 try:leftover.rmdir()
                 except OSError:pass
+        prune_bootstrap_backups(root)
         return {'alreadyInstalled':False,'backup':receipt['backup'],'bootstrapInstalled':True}
+
+
+def prune_bootstrap_backups(root,keep=2):
+    try:
+        root=Path(root).absolute()
+        current=bootstrap_receipt(root)
+        if current is None or current['phase']!='committed':return
+        active_name=Path(current['backup']).name
+        backups_dir=root/'backups'
+        if backups_dir.is_symlink() or not backups_dir.is_dir():return
+        pattern=re.compile(r'^bootstrap-[a-f0-9]{32}$')
+        others=[entry for entry in backups_dir.iterdir()
+                if entry.name!=active_name and pattern.match(entry.name)
+                and entry.is_dir() and not entry.is_symlink()]
+        limit=max(0,keep-1)
+        if len(others)>limit:
+            others.sort(key=lambda p:p.stat().st_mtime)
+            for old in others[:len(others)-limit]:
+                shutil.rmtree(old,ignore_errors=True)
+    except OSError:pass
 
 
 def finish_if_needed(root,cli_path=Path('/opt/bin/huectl'),init_path=Path('/opt/etc/init.d/S97keenetic-hue')):

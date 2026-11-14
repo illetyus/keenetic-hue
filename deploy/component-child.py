@@ -55,4 +55,14 @@ else:
     log_path=paths['log']
     if not log_path.is_symlink() and log_path.is_file() and log_path.stat().st_size>=131072:
         log_path.replace(log_path.with_name(log_path.name+'.previous'))
-    os.execve(paths['binary'],[str(paths['binary']),*restricted_arguments(paths['token'],paths['log'])],env)
+    args=[str(paths['binary']),*restricted_arguments(paths['token'],paths['log'])]
+    saved_err=os.dup(2)
+    try:
+        devnull=os.open(os.devnull,os.O_WRONLY)
+        try:
+            os.dup2(devnull,1);os.dup2(devnull,2)
+        finally:
+            os.close(devnull)
+        os.execve(paths['binary'],args,env)
+    except BaseException:
+        os.dup2(saved_err,2);os.close(saved_err);raise

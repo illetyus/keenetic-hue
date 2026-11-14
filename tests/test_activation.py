@@ -86,3 +86,36 @@ class ActivationTests(unittest.TestCase):
             self.assertFalse((root/'active.json').exists())
             receipt = json.loads((root/'state/activation.json').read_text())
             self.assertEqual(receipt['phase'], 'rolled_back')
+
+    def test_activate_candidate_prunes_unreferenced_releases_and_runtime_projections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'system'; key = Ed25519PrivateKey.generate()
+            public = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+            runtime = ('mips-3.4', 'cp313', {'bumble': '0.0.236'})
+            archives = {}
+            for seq, version in enumerate(('0.1.0', '0.2.0', '0.3.0', '0.4.0'), 1):
+                archive = Path(tmp)/f'{version}.huerel'
+                build_release(
+                    {'agent/hue_agent/__init__.py': version.encode(),
+                     'metadata/state-schema.json': json.dumps({'schema': 1, 'read': [1], 'write': 1}).encode()},
+                    archive, key, version, *runtime, release_sequence=seq,
+                )
+                archives[version] = archive
+            install_candidate(verify_release(archives['0.1.0'], public, *runtime), root, 'fresh')
+            (Path(tmp)/'system-runtime'/'bin'/'0.1.0').mkdir(parents=True, exist_ok=True)
+            (Path(tmp)/'system-runtime'/'agent'/'code'/'0.1.0').mkdir(parents=True, exist_ok=True)
+            (root/'active.json').write_text('{"schema":1,"releaseId":"0.1.0"}'); (root/'active.json').chmod(0o600)
+            (root/'state/schema.json').write_text('{"schema":1}'); (root/'state/schema.json').chmod(0o600)
+            health = lambda: {'healthy': True, 'releaseId': self.current(root)}
+            for ver in ('0.2.0', '0.3.0', '0.4.0'):
+                install_candidate(verify_release(archives[ver], public, *runtime), root, 'repair')
+                (Path(tmp)/'system-runtime'/'bin'/ver).mkdir(parents=True, exist_ok=True)
+                (Path(tmp)/'system-runtime'/'agent'/'code'/ver).mkdir(parents=True, exist_ok=True)
+                activate_candidate(root, ver, public, runtime, lambda: True, lambda: True, health)
+            self.assertFalse((root/'releases'/'0.1.0').exists())
+            self.assertFalse((Path(tmp)/'system-runtime'/'bin'/'0.1.0').exists())
+            self.assertFalse((Path(tmp)/'system-runtime'/'agent'/'code'/'0.1.0').exists())
+            for kept in ('0.2.0', '0.3.0', '0.4.0'):
+                self.assertTrue((root/'releases'/kept).is_dir())
+                self.assertTrue((Path(tmp)/'system-runtime'/'bin'/kept).is_dir())
+                self.assertTrue((Path(tmp)/'system-runtime'/'agent'/'code'/kept).is_dir())
