@@ -28,6 +28,9 @@ def names():
 def targets():return [n for n in names() if n!='config/release-trust.pub']+['state/schema.json','active.json']
 
 
+SIDECARS=('state/commands.sqlite-wal','state/commands.sqlite-shm','state/commands.sqlite-journal')
+
+
 def receipt(root):
     path=safe_path(root/'state/initialize.json')
     if not path.exists():return None
@@ -53,7 +56,7 @@ def recover_if_needed(root,service):
     for folder in ('','config','secrets','state'):private_directory(quarantine/folder)
     # Preserve partially restored data, including any reservations made before failure.
     # Remove selection first; a subsequent recovery continues from the same receipt.
-    for name in ['active.json',*targets()[:-1],'state/commands.sqlite-wal','state/commands.sqlite-shm']:
+    for name in ['active.json',*targets()[:-1],*SIDECARS]:
         path=safe_path(root/name);saved=safe_path(quarantine/name)
         if path.exists():
             if not path.is_file():raise ValueError('INITIALIZE_TARGET_TYPE')
@@ -106,7 +109,7 @@ def initialize(root,archive,password,release_id,key,runtime,service,health,dry_r
     root=Path(root).absolute();safe_path(root)
     pending=receipt(root)
     if pending and pending['phase'] not in ('committed','rolled_back'):raise RuntimeError('INITIALIZE_RECOVERY_REQUIRED')
-    if any(safe_path(root/name).exists() for name in targets()):raise ValueError('INITIALIZE_REQUIRES_EMPTY_INSTALLATION')
+    if any(safe_path(root/name).exists() for name in (*targets(),*SIDECARS)):raise ValueError('INITIALIZE_REQUIRES_EMPTY_INSTALLATION')
     if any(safe_path(p).exists() for p in (*legacy.directories().values(),*legacy.entries().values())):
         raise ValueError('INITIALIZE_LEGACY_INSTALLATION_PRESENT')
     slot=verify_slot(root,release_id,key,runtime)

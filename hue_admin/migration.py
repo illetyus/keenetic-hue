@@ -155,13 +155,18 @@ def rollback(root,value,old,new,layout):
             if path.exists():raise ValueError('MIGRATION_DIRECTORY_COLLISION')
             rename(saved,path)
     if journal is not None:
-        # Both owners stopped: remove only the fixed obsolete WAL sidecars.
-        for suffix in ('-wal','-shm'):
+        # Both owners stopped: remove obsolete WAL/journal sidecars before restore.
+        for suffix in ('-wal','-shm','-journal'):
             side=safe_path(layout.agent/('commands.sqlite'+suffix))
             if side.exists():
                 if not side.is_file():raise ValueError('MIGRATION_DATABASE_TYPE')
                 side.unlink();sync_directory(side.parent)
         atomic_replace(layout.agent/'commands.sqlite',journal)
+    for suffix in ('-wal','-shm','-journal'):
+        side=safe_path(root/('state/commands.sqlite'+suffix))
+        if side.exists():
+            if not side.is_file():raise ValueError('MIGRATION_TARGET_TYPE')
+            side.unlink();sync_directory(side.parent)
     for name in FILES:
         path=safe_path(root/name)
         if name in before:atomic_replace(path,before[name])

@@ -130,3 +130,28 @@ class ExistingMigrationTests(unittest.TestCase):
             calls.clear()
             with self.assertRaises(RuntimeError):recover_if_needed(root,old,lambda verb:False,layout=layout)
             self.assertEqual(calls,[]);self.assertTrue((root/'active.json').exists())
+
+    def test_rollback_removes_legacy_journal_and_new_state_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root,layout,slot,data,calls,old,new=self.fixture(tmp)
+            def updated():
+                legacy_journal=layout.agent/'commands.sqlite-journal'
+                legacy_journal.write_bytes(b'stale-legacy');legacy_journal.chmod(0o600)
+                return {'healthy':False}
+            with patch('hue_admin.migration.verify_slot',return_value=slot),self.assertRaises(RuntimeError):
+                migrate(root,'0.2.0',b'k'*32,('fixture',),old,new,updated,layout=layout)
+            for suffix in ('-wal','-shm','-journal'):
+                self.assertFalse((layout.agent/('commands.sqlite'+suffix)).exists())
+        with tempfile.TemporaryDirectory() as tmp:
+            root,layout,slot,data,calls,old,new=self.fixture(tmp)
+            def cut(phase):
+                if phase=='copied':
+                    for suffix in ('-wal','-shm','-journal'):
+                        side=root/('state/commands.sqlite'+suffix)
+                        side.write_bytes(b'stale-new');side.chmod(0o600)
+                    raise PowerCut()
+            with patch('hue_admin.migration.verify_slot',return_value=slot),self.assertRaises(PowerCut):
+                migrate(root,'0.2.0',b'k'*32,('fixture',),old,new,lambda:None,layout=layout,failpoint=cut)
+            recover_if_needed(root,old,new,layout=layout)
+            for suffix in ('-wal','-shm','-journal'):
+                self.assertFalse((root/('state/commands.sqlite'+suffix)).exists())

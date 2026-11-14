@@ -31,6 +31,17 @@ def atomic_replace(path, data):
         if temporary.exists():temporary.unlink()
 
 
+def _unlink_sqlite_sidecars(path):
+    path=Path(path).absolute()
+    for suffix in ('-wal','-shm','-journal'):
+        side=Path(str(path)+suffix)
+        if side.is_symlink() or any(p.is_symlink() for p in side.parents):
+            raise ValueError('RESTORE_SYMLINK')
+        if side.exists():
+            if not side.is_file():raise ValueError('RESTORE_SIDECAR_TYPE')
+            side.unlink();sync_directory(side.parent)
+
+
 def record(directory, receipt):
     atomic_replace(directory/'receipt.json',json.dumps(receipt,sort_keys=True).encode('utf-8'))
 
@@ -50,6 +61,8 @@ def recover(targets, directory, stop, start):
         if any(hashlib.sha256(data).hexdigest()!=hashes[name] for name,data in before.items()):
             raise ValueError('RESTORE_RECOVERY_HASH')
         if not stop():raise RuntimeError('RESTORE_RECOVERY_STOP_FAILED')
+        for name,target in targets.items():
+            if name.endswith('.sqlite'):_unlink_sqlite_sidecars(target)
         for name,data in before.items():atomic_replace(targets[name],data)
     if not start():raise RuntimeError('RESTORE_RECOVERY_START_FAILED')
     receipt['phase']='rolled_back';record(directory,receipt)

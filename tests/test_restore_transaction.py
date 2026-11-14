@@ -66,3 +66,24 @@ class RestoreTransactionTests(unittest.TestCase):
             (transaction/'before/config/agent.json').write_bytes(b'tampered')
             with self.assertRaises(ValueError):recover(targets,transaction,lambda:True,lambda:True)
             self.assertTrue(all(p.read_bytes()==b'old' for p in targets.values()))
+
+    def test_failed_health_removes_sqlite_sidecars_on_rollback(self):
+        with tempfile.TemporaryDirectory() as root:
+            targets,transaction=self.fixture(root)
+            db=Path(root)/'live/commands.sqlite'
+            db.write_bytes(b'old');db.chmod(0o600)
+            targets['state/commands.sqlite']=db
+            calls=0
+            def start():
+                nonlocal calls
+                calls+=1
+                if calls==1:
+                    for suffix in ('-wal','-shm','-journal'):
+                        side=Path(str(db)+suffix)
+                        side.write_bytes(b'stale');side.chmod(0o600)
+                return True
+            with self.assertRaises(RuntimeError):
+                apply_files({n:b'new' for n in targets},targets,transaction,lambda:True,start,lambda:False)
+            self.assertEqual(db.read_bytes(),b'old')
+            for suffix in ('-wal','-shm','-journal'):
+                self.assertFalse(Path(str(db)+suffix).exists())

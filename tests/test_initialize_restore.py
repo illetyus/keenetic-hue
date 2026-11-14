@@ -106,3 +106,24 @@ class InitializeRestoreTests(unittest.TestCase):
             archive.write_bytes(seal(files,'fixture-password',{'adapter':'adapter','lamp':'lamp'}))
             with patch('hue_admin.initialize_restore.verify_slot',return_value=slot),self.assertRaisesRegex(ValueError,'INITIALIZE_TOKEN'):
                 initialize(root,archive,'fixture-password','0.2.0',key,('fixture',),service,lambda:None,True,legacy=layout)
+
+    def test_recovery_quarantines_sqlite_rollback_journal_and_blocks_stale_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root,key,files,archive,layout,calls,service,slot=self.fixture(tmp)
+            def cut(phase):
+                if phase=='started':
+                    journal=root/'state/commands.sqlite-journal'
+                    journal.write_bytes(b'stale-journal');journal.chmod(0o600)
+                    raise PowerCut()
+            with patch('hue_admin.initialize_restore.verify_slot',return_value=slot),self.assertRaises(PowerCut):
+                initialize(root,archive,'fixture-password','0.2.0',key,('fixture',),service,lambda:None,legacy=layout,failpoint=cut)
+            recover_if_needed(root,service)
+            self.assertFalse((root/'state/commands.sqlite-journal').exists())
+            quarantined=list((root/'backups').glob('initialize-*/state/commands.sqlite-journal'))
+            self.assertEqual(len(quarantined),1)
+            for suffix in ('-wal','-shm','-journal'):
+                stale=root/('state/commands.sqlite'+suffix)
+                stale.write_bytes(b'stale');stale.chmod(0o600)
+                with patch('hue_admin.initialize_restore.verify_slot',return_value=slot),self.assertRaisesRegex(ValueError,'INITIALIZE_REQUIRES_EMPTY_INSTALLATION'):
+                    initialize(root,archive,'fixture-password','0.2.0',key,('fixture',),service,lambda:None,True,legacy=layout)
+                stale.unlink()
