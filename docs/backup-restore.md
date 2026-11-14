@@ -84,7 +84,7 @@ huectl restore /secure/path/my-backup.huebak --initialize --release-id RELEASE_I
 huectl health --live --json
 ```
 
-Replace `RELEASE_ID` with the installed release version (for example `0.2.0-rc.18`).
+Replace `RELEASE_ID` with the installed release version (for example `0.2.0-rc.19`).
 Clean initialization does not copy numeric Linux UIDs from the backup; it checks
 service accounts for conflicts and assigns ownership safely without running
 recursive `chown` across the unified root or USB mount.

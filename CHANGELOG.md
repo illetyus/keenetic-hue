@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0-rc.19 — 2026-11-14
+
+Code commit `ececa49`. SQLite rollback sidecar (`-wal`, `-shm`, `-journal`)
+cleanup hardening across `hue_admin/restore_transaction.py`,
+`hue_admin/migration.py`, and `hue_admin/initialize_restore.py`, verified with
+20 targeted regression tests, 91 portable Python tests (569 passing in `tests/`
+with 141 Windows-skipped native Linux/POSIX/root checks),
+`tools/check_publication.py`, and live router acceptance on
+`keenetic-hue-0.2.0-rc.19.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.19"`). [Release notes](docs/releases/0.2.0-rc.19.md).
+
+- Removed stale `-wal`, `-shm`, and `-journal` sidecars before restoring
+  `state/commands.sqlite` in `hue_admin/restore_transaction.py` `recover()`, and
+  added regression coverage in `tests/test_restore_transaction.py`.
+- Extended `hue_admin/migration.py` `rollback()` sidecar cleanup to remove
+  `commands.sqlite-journal` in legacy `agent/state` and `('-wal', '-shm',
+  '-journal')` under `root/state/`, with regression coverage in
+  `tests/test_existing_migration.py`.
+- Quarantined `state/commands.sqlite{-wal,-shm,-journal}` during
+  `recover_if_needed()` and rejected stale sidecars in `initialize()` in
+  `hue_admin/initialize_restore.py`, with regression coverage in
+  `tests/test_initialize_restore.py`.
+
 ## 0.2.0-rc.18 — 2026-11-14
 
 Code commit `674b153`. Security hardening across `hue_admin/cli.py`,

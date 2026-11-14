@@ -86,7 +86,7 @@ chmod 600 /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak
 ## 5. Dry-Run Verification and Initialization Restore
 
 These commands accept the **10-file unified backup format** (`VERSION` is the
-installed release ID, e.g. `0.2.0-rc.18`):
+installed release ID, e.g. `0.2.0-rc.19`):
 
 ```sh
 huectl restore /opt/var/lib/keenetic-hue-system/backups/hue-01.huebak \
