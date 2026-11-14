@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0-rc.18 — 2026-11-14
+
+Code commit `674b153`. Security hardening across `hue_admin/cli.py`,
+`deploy/install.py`, and `deploy/update.py`, verified with 91 portable Python
+tests (out of 566 total Python tests including 141 Windows-skipped native
+Linux/POSIX/root checks), `tools/check_publication.py`, and live router
+acceptance on `keenetic-hue-0.2.0-rc.18.huerel` (`healthy: true`,
+`bootstrapInSync: true`, `releaseId: "0.2.0-rc.18"`).
+[Release notes](docs/releases/0.2.0-rc.18.md).
+
+- Removed the undocumented `?` branch in `hue_admin/cli.py` that printed an
+  auto-generated backup password to `sys.stderr`, enforcing non-echoing `getpass`
+  confirmation and adding regression coverage in `tests/test_admin_cli.py`.
+- Enforced explicit `0o600` descriptor writes (`os.open` + `O_NOFOLLOW` +
+  `fchmod`) and cleaned up legacy taint naming in `deploy/install.py` and
+  `deploy/update.py`.
+
 ## 0.2.0-rc.17 — 2026-11-14
 
 Code commit `2c0df72`. Operational hygiene and hardening across `hue_agent/`,

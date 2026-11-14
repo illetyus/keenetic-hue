@@ -1,6 +1,6 @@
 # Security policy
 
-The maintained router candidate is **0.2.0-rc.17** on the profile in
+The maintained router candidate is **0.2.0-rc.18** on the profile in
 [README](README.md). The Worker is versioned separately. Retaining older slots
 for rollback does not promise ongoing vulnerability fixes for them.
 

@@ -4,9 +4,9 @@
 
 **Philips Hue BLE lambanı ayrı bir Hue Bridge veya gelen port açmadan, Keenetic router üzerindeki imzalı ve izole Entware ajanıyla Google Home'a bağla.**
 
-[English (Default)](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC17 Release Notes](docs/releases/0.2.0-rc.17.md) · [Repository Design Research](docs/repository-design.md)
+[English (Default)](README.md) · [Installation](docs/installation.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md) · [RC18 Release Notes](docs/releases/0.2.0-rc.18.md) · [Repository Design Research](docs/repository-design.md)
 
-> **Durum (`v0.2.0-rc.17`):** Belgelenen kişisel donanım profilinde 14 Kasım 2026 tarihinde canlı `huectl status --json` ve `huectl health --live --json` kabulünü geçmiş aday sürüm (`healthy: true`, `bootstrapInSync: true`). Evrensel bir Hue Bridge ikamesi veya Google sertifikalı ticari ürün değildir; farklı donanımlar ve sıfırdan açılan Google/Cloudflare hesapları ayrı doğrulama gerektirir.
+> **Durum (`v0.2.0-rc.18`):** Belgelenen kişisel donanım profilinde 14 Kasım 2026 tarihinde canlı `huectl status --json` ve `huectl health --live --json` kabulünü geçmiş aday sürüm (`healthy: true`, `bootstrapInSync: true`). Evrensel bir Hue Bridge ikamesi veya Google sertifikalı ticari ürün değildir; farklı donanımlar ve sıfırdan açılan Google/Cloudflare hesapları ayrı doğrulama gerektirir.
 
 ---
 
@@ -65,7 +65,7 @@ Depodaki her temel yetenek doğrudan ilgili modüle ve taşınabilir doğrulama 
 
 ### 1. Ön Koşullar (Pre-installation)
 - Keenetic üzerinde `ext4` biçimli USB depolama, çalışan Entware ortamı ve [`requirements-router.lock.json`](requirements-router.lock.json) içindeki bağımlılıklar ([hazırlık adımları](docs/reinstall.md)).
-- İmzalı `keenetic-hue-0.2.0-rc.17.huerel` paketi, bağımsız doğrulanmış [`keys/release-trust.pub`](keys/release-trust.pub) açık anahtarı (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`) ve [`deploy/install_release.py`](deploy/install_release.py) kurucusu.
+- İmzalı `keenetic-hue-0.2.0-rc.18.huerel` paketi, bağımsız doğrulanmış [`keys/release-trust.pub`](keys/release-trust.pub) açık anahtarı (`SHA-256: 3eb6abbce938c6f75054da02ecca3cb291f576ef0633b5de54dd78fa2cd8a4be`) ve [`deploy/install_release.py`](deploy/install_release.py) kurucusu.
 
 ### 2. İmzalı Kurulum ve Yapılandırma (Installation)
 - **Boş Entware ortamına imzalı paketi doğrulayarak kurmak için:** [Installation](docs/installation.md) kılavuzundaki `sha256sum -c` + `python3 -I install_release.py` komutunu çalıştır.
@@ -86,7 +86,7 @@ Sağlıklı ve sürüm sahipliği doğrulanmış bir kurulum aşağıdaki yapıd
 {
   "schemaVersion": 1,
   "healthy": true,
-  "releaseId": "0.2.0-rc.17",
+  "releaseId": "0.2.0-rc.18",
   "components": {
     "agent":     { "state": "running", "reason": "OWNED_VERSION" },
     "tunnel":    { "state": "ready",   "reason": "TUNNEL_READY" },
