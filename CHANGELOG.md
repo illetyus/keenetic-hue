@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0-rc.17 — 2026-11-14
+
+Code commit `2c0df72`. Operational hygiene and hardening across `hue_agent/`,
+`deploy/`, and `hue_admin/`, verified with 91 portable Python tests (out of 566
+total Python tests including 141 Windows-skipped native Linux/POSIX/root checks),
+`tools/check_publication.py`, and live router acceptance on
+`keenetic-hue-0.2.0-rc.17.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.17"`). [Release notes](docs/releases/0.2.0-rc.17.md).
+
+- Coalesced repeated identical `ble_retry` warnings in `hue_agent/agent.py`
+  after attempt 6 (logging on error-type change or every 80 attempts) and
+  included `recoveredAfter` on `ble_ready`.
+- Redirected `fd 1` (`stdout`) and `fd 2` (`stderr`) to `/dev/null` before
+  `execve` in `deploy/component-child.py`'s `tunnel` branch while restoring
+  `stderr` on `execve` failure.
+- Added post-commit `prune_obsolete_releases` in `hue_admin/activation.py` and
+  `prune_bootstrap_backups(root, keep=2)` in `hue_admin/bootstrap_install.py`
+  with regression tests in `tests/`.
+
 ## 0.2.0-rc.16 — 2026-11-11
 
 Code commit `311c46e`. Hardening across `hue_agent/`, `hue_admin/`, `cloud/`,
