@@ -114,3 +114,36 @@ it('accepts cached Relay retries older than 10s within Relay retention window wi
   expect((await e!.json() as any).payload.commands[0]).toMatchObject({ids:[id],status:'SUCCESS',states:{online:true,on:true,brightness:40}});
  }finally{vi.useRealTimers();}
 });
+
+it('supports BrightnessRelative percent and weight commands and rejects invalid params',async()=>{
+ const f=fixture();
+ (f.env.HUE_RELAY as any).getByName=()=>({execute:async(input:any)=>{
+  f.calls.push(input);
+  if(input.operation==='query')return Response.json({commandId:input.requestId,status:'verified',deviceId:id,on:true,brightness:60,brightnessRaw:152,observedAt:Date.now()/1000});
+  return Response.json({commandId:input.requestId,status:'verified',deviceId:id,on:input.brightness>0,brightness:input.brightness,brightnessRaw:Math.round(input.brightness*254/100),observedAt:Date.now()/1000});
+ }});
+ const dim=await googleRoute(request('EXECUTE',{commands:[{devices:[{id}],execution:[{command:'action.devices.commands.BrightnessRelative',params:{brightnessRelativePercent:-20}}]}]},'rel-pct-1'),f.env);
+ expect(dim!.status).toBe(200);
+ expect((await dim!.json() as any).payload.commands[0]).toMatchObject({ids:[id],status:'SUCCESS',states:{online:true,on:true,brightness:40}});
+ expect(f.calls.at(-1)).toMatchObject({operation:'set',brightness:40});
+
+ const up=await googleRoute(request('EXECUTE',{commands:[{devices:[{id}],execution:[{command:'action.devices.commands.BrightnessRelative',params:{brightnessRelativeWeight:2}}]}]},'rel-wt-1'),f.env);
+ expect(up!.status).toBe(200);
+ expect((await up!.json() as any).payload.commands[0]).toMatchObject({ids:[id],status:'SUCCESS',states:{online:true,on:true,brightness:90}});
+ expect(f.calls.at(-1)).toMatchObject({operation:'set',brightness:90});
+
+ for(const [idx,params] of [{},{brightnessRelativePercent:10,brightnessRelativeWeight:1},{brightnessRelativePercent:101},{brightnessRelativeWeight:6},{brightnessRelativePercent:1.5}].entries()){
+  const bad=await googleRoute(request('EXECUTE',{commands:[{devices:[{id}],execution:[{command:'action.devices.commands.BrightnessRelative',params}]}]},'rel-bad-'+idx),f.env);
+  expect(bad!.status).toBe(400);
+ }
+});
+
+it('collapses OnOff(true) paired with BrightnessAbsolute into one brightness write',async()=>{
+ const f=fixture();f.env.GOOGLE_QUEUE_ENABLED='true';const accepted:any[]=[];
+ const original=(f.env.HUE_AUTH as any).getByName;
+ (f.env.HUE_AUTH as any).getByName=()=>({...original(),submitCommands:async(...args:any[])=>{accepted.push(args);return {accepted:true};}});
+ const payload={commands:[{devices:[{id}],execution:[{command:'action.devices.commands.OnOff',params:{on:true}},{command:'action.devices.commands.BrightnessAbsolute',params:{brightness:35}}]}]};
+ const res=await googleRoute(request('EXECUTE',payload,'collapse-q-1'),f.env);
+ expect((await res!.json() as any).payload.commands).toEqual([{ids:[id],status:'PENDING'}]);
+ expect(accepted[0]).toEqual(['grant','collapse-q-1',[{brightness:35}]]);
+});

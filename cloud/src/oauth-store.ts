@@ -238,6 +238,17 @@ export class AuthStore extends DurableObject<Env>{
         }
       }catch{/* Claimed operations are never replayed after an uncertain delivery. */}
       this.commands.finish(job.id,outcome,now());
+      if(outcome==='OUTCOME_UNKNOWN'&&!this.commands.status().pending&&this.reportsEnabled()&&this.currentGrant()?.id===job.grant){
+        try{
+          const qid=crypto.randomUUID();
+          const qres=await this.env.HUE_RELAY.getByName(DEVICE_ID).execute({requestId:qid,deviceId:DEVICE_ID,operation:'query'},{kind:'google',grantId:job.grant});
+          if(qres.status===200){
+            const qr=verifiedResult(await qres.json(),qid);
+            if(qr.status==='verified')await this.enqueueReport(job.grant,{online:true,on:qr.on,brightness:qr.brightness,observedAt:qr.observedAt!},false,false);
+            else if(qr.status==='offline')await this.enqueueReport(job.grant,{online:false,observedAt:now()},false,false);
+          }
+        }catch{/* Best-effort state sync after uncertain write outcome. */}
+      }
     }finally{this.commandActive=false;}
   }
   private async sendPendingReport(force=false){

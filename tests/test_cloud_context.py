@@ -56,6 +56,7 @@ class CloudContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.agent.ready)
 
     async def test_invalidation_during_last_write_is_unknown(self):
+        self.io.values[POWER] = b'\x00'
         original = self.io.write
         async def write(uuid, data):
             await original(uuid, data)

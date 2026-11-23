@@ -83,20 +83,53 @@ export async function googleRoute(request:Request,env:Env,ctx?:ExecutionContext)
     }
    }
    // Validate all command parameters before any physical write.
-   const mapped=jobs.map(job=>{stage='params';
+   type MappedFields = {on?:boolean;brightness?:number;relativeDelta?:number};
+   const mapped:Array<{index:string;fields:MappedFields|null}>=jobs.map(job=>{stage='params';
     if(job.command==='action.devices.commands.OnOff'){const p=shape(job.params,['on']);if(typeof p.on!=='boolean')throw Error('invalid_request');return {index:job.index,fields:{on:p.on}};}
     if(job.command==='action.devices.commands.BrightnessAbsolute'){const p=shape(job.params,['brightness']);if(!Number.isInteger(p.brightness)||p.brightness<0||p.brightness>100)throw Error('invalid_request');return {index:job.index,fields:{brightness:p.brightness}};}
+    if(job.command==='action.devices.commands.BrightnessRelative'){
+     const p=shape(job.params,['brightnessRelativePercent','brightnessRelativeWeight'],[]);
+     const hasPct=Object.hasOwn(p,'brightnessRelativePercent');
+     const hasWt=Object.hasOwn(p,'brightnessRelativeWeight');
+     if(hasPct===hasWt)throw Error('invalid_request');
+     if(hasPct){
+      if(!Number.isInteger(p.brightnessRelativePercent)||p.brightnessRelativePercent<-100||p.brightnessRelativePercent>100)throw Error('invalid_request');
+      return {index:job.index,fields:{relativeDelta:p.brightnessRelativePercent}};
+     }
+     if(!Number.isInteger(p.brightnessRelativeWeight)||p.brightnessRelativeWeight<-5||p.brightnessRelativeWeight>5)throw Error('invalid_request');
+     return {index:job.index,fields:{relativeDelta:p.brightnessRelativeWeight*15}};
+    }
     return {index:job.index,fields:null};
    });
    if(mapped.some(j=>j.fields===null))return respond({commands:[{ids:[DEVICE_ID],status:'ERROR',errorCode:'functionNotSupported'}]});
+   if(mapped.some(j=>j.fields!.relativeDelta!==undefined)){
+    stage='relay';
+    const cur=await execute('query','rel-query');
+    if(cur.status!=='verified'){outcome=cur.errorCode??cur.status;return respond({commands:[failed(cur)]});}
+    let curBrightness=cur.on?cur.brightness!:0;
+    for(const item of mapped){
+     const f=item.fields!;
+     if(f.on===false)curBrightness=0;
+     else if(f.brightness!==undefined)curBrightness=f.brightness;
+     else if(f.relativeDelta!==undefined){curBrightness=Math.max(0,Math.min(100,curBrightness+f.relativeDelta));item.fields={brightness:curBrightness};}
+    }
+   }
+   const resolved:Array<{index:string;fields:{on?:boolean;brightness?:number}}>=[];
+   for(const item of mapped){
+    const f=item.fields! as {on?:boolean;brightness?:number};
+    const prev=resolved.at(-1);
+    if(prev&&prev.fields.on===true&&f.brightness!==undefined&&f.brightness>0){resolved[resolved.length-1]={index:item.index,fields:{brightness:f.brightness}};continue;}
+    if(prev&&prev.fields.brightness!==undefined&&prev.fields.brightness>0&&f.on===true){continue;}
+    resolved.push({index:item.index,fields:f});
+   }
    if(env.GOOGLE_QUEUE_ENABLED==='true'){
     stage='queue';
-    const accepted=await within(env.HUE_AUTH.getByName('owner').submitCommands(identity.grantId,d.requestId,mapped.map(j=>j.fields!) as Array<{on:boolean}|{brightness:number}>),deadline);
+    const accepted=await within(env.HUE_AUTH.getByName('owner').submitCommands(identity.grantId,d.requestId,resolved.map(j=>j.fields) as Array<{on:boolean}|{brightness:number}>),deadline);
     outcome=accepted.accepted?'pending':accepted.errorCode??'QUEUE_FAILED';
     return respond({commands:[accepted.accepted?{ids:[DEVICE_ID],status:'PENDING'}:{ids:[DEVICE_ID],status:'ERROR',errorCode:'transientError'}]});
    }
    let last:Result|undefined;
-   for(const job of mapped){stage='relay';last=await execute('set',job.index,job.fields!);outcome=last.errorCode??last.status;if(last.status!=='verified')return respond({commands:[failed(last)]});}
+   for(const job of resolved){stage='relay';last=await execute('set',job.index,job.fields);outcome=last.errorCode??last.status;if(last.status!=='verified')return respond({commands:[failed(last)]});}
    if(ctx&&last?.status==='verified')ctx.waitUntil(env.HUE_AUTH.getByName('owner').queueReport(identity.grantId,{online:true,on:last.on,brightness:last.brightness,observedAt:last.observedAt!}).then(()=>{}).catch(()=>{}));
    return respond({commands:[{ids:[DEVICE_ID],status:'SUCCESS',states:state(last!)}]});
   }

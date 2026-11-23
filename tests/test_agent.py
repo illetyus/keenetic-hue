@@ -194,7 +194,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         r1, r2 = await asyncio.gather(first, second)
         self.assertEqual(r1['status'], 'verified')
         self.assertEqual(r2, r1)
-        self.assertEqual(len(self.io.writes), 2)
+        self.assertEqual(len(self.io.writes), 1)
 
     async def test_crash_left_pending_row_still_returns_outcome_unknown(self):
         data = payload()
@@ -214,6 +214,7 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
             self.io.disconnected = False
         self.io.connect = slow_connect
         monitor = asyncio.create_task(self.agent.monitor())
+        await asyncio.sleep(0)
         try:
             await asyncio.wait_for(connecting.wait(), 1)
             result = await asyncio.wait_for(self.agent.execute(payload(expiresAt=time.time()+0.5)), 0.2)
@@ -376,3 +377,30 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retries[6][1], {'errorType': 'TimeoutError', 'retrySeconds': 30, 'attempts': 80})
         self.assertEqual(retries[7][1], {'errorType': 'ConnectionError', 'retrySeconds': 30, 'attempts': 86})
         self.assertEqual(readies, [('ble_ready', {'recoveredAfter': 86})])
+
+    async def test_execute_waits_briefly_when_monitor_reconnecting(self):
+        self.agent.ready = False
+        self.io.disconnected = True
+        async def connect():
+            await asyncio.sleep(0.08)
+            self.io.disconnected = False
+        self.io.connect = connect
+        monitor = asyncio.create_task(self.agent.monitor())
+        await asyncio.sleep(0)
+        try:
+            result = await self.agent.execute(payload(expiresAt=time.time()+5))
+            self.assertEqual(result['status'], 'verified')
+            self.assertEqual(result['brightness'], 40)
+        finally:
+            monitor.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await monitor
+
+    async def test_state_changed_during_command_preserves_healthy_ble_link(self):
+        self.io.disconnected = False
+        async def transient_mismatch(**kwargs):
+            raise RuntimeError('STATE_CHANGED_DURING_COMMAND')
+        self.agent.lamp.set_raw = transient_mismatch
+        result = await self.agent.execute(payload(expiresAt=time.time()+5))
+        self.assertEqual(result['errorCode'], 'OUTCOME_UNKNOWN')
+        self.assertTrue(self.agent.ready)
