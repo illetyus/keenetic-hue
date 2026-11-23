@@ -3,8 +3,18 @@ import http.client
 import time
 from pathlib import Path
 from . import service_manager as manager
-from .health import probe,authenticated_probe
+from .health import verified_probe, authenticated_probe
 from .lifecycle_events import unavailable_reason
+
+
+def _component_identity(root, component, release_id):
+    """Resolve the policy mode and expected UID/GID contract for a managed component."""
+    from .runtime_policy import release_policy
+    mode = release_policy(root, release_id)[component]
+    if mode == 'dedicated':
+        from .privileges import load_service_identity
+        return mode, load_service_identity(root, 'hue-' + component)
+    return mode, {'uid': 0, 'gid': 0}
 
 
 def status(live=False,root=manager.SYSTEM):
@@ -37,12 +47,10 @@ def status(live=False,root=manager.SYSTEM):
                 return token
             pid=manager.child_pid('agent',root);record=manager.owner_record('agent',root)
             if not pid or not record:raise ValueError('AGENT_OWNER')
-            from .runtime_policy import release_policy
+            mode,identity=_component_identity(root,'agent',record['releaseId'])
             socket_path=root/'run/health.sock';identity_options={}
-            if release_policy(root,record['releaseId'])['agent']=='dedicated':
-                from .privileges import load_service_identity
+            if mode=='dedicated':
                 from .agent_storage import agent_runtime_paths
-                identity=load_service_identity(root,'hue-agent')
                 socket_path=agent_runtime_paths(root,record['releaseId'])['health_socket']
                 identity_options={'expected_uid':identity['uid'],'expected_gid':identity['gid']}
             code,value=authenticated_probe(8787,'/v1/state',token_loader,pid,socket_path,
@@ -58,21 +66,31 @@ def status(live=False,root=manager.SYSTEM):
             components['ble']=item('unknown','LOCAL_CHECK_FAILED')
             physical=False
         try:
-            code,_=probe(18790,'/ready')
+            if not owned['tunnel']:raise ValueError('TUNNEL_OWNER')
+            tunnel_pid=manager.child_pid('tunnel',root);tunnel_record=manager.owner_record('tunnel',root)
+            if not tunnel_pid or not tunnel_record:raise ValueError('TUNNEL_OWNER')
+            _,identity=_component_identity(root,'tunnel',tunnel_record['releaseId'])
+            code,_=verified_probe(18790,'/ready',tunnel_pid,
+                lambda:manager.child_owned('tunnel',root,tunnel_record,tunnel_pid),
+                expected_uid=identity['uid'],expected_gid=identity['gid'])
             ready=code==200 and owned['tunnel']
-            components['tunnel']=item('ready' if ready else 'degraded','TUNNEL_READY' if ready else
-                                     (components['tunnel']['reason'] if not owned['tunnel'] else 'TUNNEL_OWNER_OR_READINESS_FAILED'))
+            components['tunnel']=item('ready' if ready else 'degraded',
+                                     'TUNNEL_READY' if ready else 'TUNNEL_OWNER_OR_READINESS_FAILED')
             physical=physical and ready
-        except (OSError,ValueError,http.client.HTTPException):
-            components['tunnel']=item('degraded',components['tunnel']['reason'] if not owned['tunnel'] else 'TUNNEL_UNREACHABLE');physical=False
+        except (OSError,ValueError,KeyError,TypeError,AttributeError,http.client.HTTPException) as error:
+            if not owned['tunnel']:
+                reason=components['tunnel']['reason']
+            elif isinstance(error,ValueError) and str(error) in ('HEALTH_PEER','HEALTH_IDENTITY','TUNNEL_OWNER'):
+                reason='TUNNEL_OWNER_OR_READINESS_FAILED'
+            else:
+                reason='TUNNEL_UNREACHABLE'
+            components['tunnel']=item('degraded',reason);physical=False
     principals={component:{'expectedUid':None,'expectedGid':None} for component in ('agent','tunnel')}
     if selected:
         try:
-            from .runtime_policy import release_policy
-            from .privileges import load_service_identity
-            policy=release_policy(root,selected);expected={}
+            expected={}
             for component in ('agent','tunnel'):
-                identity=load_service_identity(root,'hue-'+component) if policy[component]=='dedicated' else {'uid':0,'gid':0}
+                _,identity=_component_identity(root,component,selected)
                 expected[component]={'expectedUid':identity['uid'],'expectedGid':identity['gid']}
             principals=expected
         except (OSError,ValueError,KeyError,TypeError):pass
