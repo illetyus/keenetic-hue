@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0-rc.21 — 2026-11-24
+
+Code commit `9ee27ce`. Hue BLE brightness transition improvements across
+`hue_agent/lamp.py` and `hue_agent/agent.py`, plus Google Home
+`BrightnessRelative` support and post-`OUTCOME_UNKNOWN` state sync in
+`cloud/src/google-home.ts` and `cloud/src/oauth-store.ts`, verified with 21
+agent tests, 94 portable Python tests, 73 Cloudflare Worker `vitest` tests +
+`tsc --noEmit`, `tools/check_publication.py`, and live router acceptance on
+`keenetic-hue-0.2.0-rc.21.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.21"`). [Release notes](docs/releases/0.2.0-rc.21.md).
+
+- Skipped redundant `POWER` writes when changing brightness on an already-on bulb,
+  skipped no-op state writes, and added single-retry brightness recovery on
+  `OFF` → `ON` transitions in `hue_agent/lamp.py` (`tests/test_core.py`).
+- Allowed `Controller.execute()` in `hue_agent/agent.py` to wait briefly while
+  `monitor()` is actively reconnecting and preserved healthy BLE links on
+  transient `STATE_CHANGED_DURING_COMMAND` errors (`tests/test_agent.py`).
+- Added `BrightnessRelative` (`brightnessRelativePercent` /
+  `brightnessRelativeWeight`) support and `OnOff(true) + BrightnessAbsolute`
+  batch collapsing in `cloud/src/google-home.ts`, plus read-only state sync
+  after `OUTCOME_UNKNOWN` in `cloud/src/oauth-store.ts`
+  (`cloud/test/google-home.test.ts`, `cloud/test/queued-execution.test.ts`).
+
 ## 0.2.0-rc.20 — 2026-11-23
 
 Code commit `bd0a799`. RAM operation directory and verified tunnel readiness
