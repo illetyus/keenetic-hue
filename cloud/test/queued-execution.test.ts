@@ -49,3 +49,21 @@ it('unlink fences pending commands and periodic polling skips a user burst',asyn
   expect(await instance.submitCommands(identity.grantId,'late',[{on:true}])).toMatchObject({accepted:false,errorCode:'AGENT_REVOKED'});
  });
 });
+
+it('queries and reports actual state after OUTCOME_UNKNOWN when no writes remain pending',async()=>{
+ const {stub,identity}=await linked();
+ await runInDurableObject(stub,async(instance:any,state)=>{
+  instance.env.GOOGLE_QUEUE_ENABLED='true';instance.env.REPORT_STATE_ENABLED='true';instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';
+  const ops:string[]=[],reports:any[]=[];
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(c:any)=>{
+   ops.push(c.operation);
+   if(c.operation==='set')return Response.json({commandId:c.requestId,status:'error',errorCode:'OUTCOME_UNKNOWN'});
+   return Response.json({commandId:c.requestId,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:55,brightnessRaw:140,observedAt:Date.now()/1000});
+  }})};
+  instance.reporter={report:async(_owner:string,s:any)=>reports.push(s)};
+  expect(await instance.submitCommands(identity.grantId,'unk-1',[{brightness:55}])).toEqual({accepted:true});
+  await instance.alarm();await state.storage.deleteAlarm();
+  expect(ops).toEqual(['set','query']);
+  expect(reports).toEqual([{online:true,on:true,brightness:55}]);
+ });
+});

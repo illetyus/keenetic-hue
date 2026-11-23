@@ -97,7 +97,9 @@ class LampTests(unittest.IsolatedAsyncioTestCase):
                     self.power_fade = False
                     return b'\x01'
                 return await super().read(uuid)
-        result = await Lamp(FadingIo(), poll_interval=0).set_raw(
+        io = FadingIo()
+        io.values[POWER] = b'\x00'
+        result = await Lamp(io, poll_interval=0).set_raw(
             on=True, brightness_raw=3, deadline=time.monotonic()+1)
         self.assertEqual(result['brightnessRaw'], 3)
 
@@ -122,10 +124,56 @@ class LampTests(unittest.IsolatedAsyncioTestCase):
                 await super().write(uuid, data)
                 if uuid == POWER:
                     self.values[BRIGHTNESS] = b'\xfe'
+            async def read(self, uuid):
+                if uuid == BRIGHTNESS and getattr(self, 'force_mismatch', False):
+                    return b'\xfe'
+                return await super().read(uuid)
+        io = RacingIo()
+        io.values[POWER] = b'\x00'
+        io.force_mismatch = True
         with self.assertRaises((RuntimeError, TimeoutError)) as failure:
-            await Lamp(RacingIo(), poll_interval=0).set_raw(
+            await Lamp(io, poll_interval=0).set_raw(
                 on=True, brightness_raw=102, deadline=time.monotonic()+1)
         self.assertIn(str(failure.exception), ('STATE_CHANGED_DURING_COMMAND', 'DEADLINE_EXCEEDED', ''))
+
+    async def test_brightness_change_while_on_skips_redundant_power_write(self):
+        io = FakeIo()
+        io.values[POWER] = b'\x01'
+        io.values[BRIGHTNESS] = b'\xfe'
+        result = await Lamp(io, poll_interval=0).set_raw(
+            on=True, brightness_raw=102, deadline=time.monotonic()+2)
+        self.assertTrue(result['on'])
+        self.assertEqual(result['brightnessRaw'], 102)
+        self.assertEqual(io.writes, [(BRIGHTNESS, b'\x66')])
+
+    async def test_noop_state_skips_all_writes(self):
+        io = FakeIo()
+        io.values[POWER] = b'\x01'
+        io.values[BRIGHTNESS] = b'\x66'
+        guarded = False
+        def guard():
+            nonlocal guarded
+            guarded = True
+        result = await Lamp(io, poll_interval=0).set_raw(
+            on=True, brightness_raw=102, deadline=time.monotonic()+2, guard=guard)
+        self.assertTrue(guarded)
+        self.assertEqual(io.writes, [])
+        self.assertEqual(result['brightnessRaw'], 102)
+
+    async def test_off_to_on_with_brightness_recovers_if_power_on_restores_old_brightness(self):
+        class SnapBackIo(FakeIo):
+            async def write(self, uuid, data):
+                await super().write(uuid, data)
+                if uuid == POWER and data == b'\x01' and not getattr(self, 'snapped', False):
+                    self.snapped = True
+                    self.values[BRIGHTNESS] = b'\xfe'
+        io = SnapBackIo()
+        io.values[POWER] = b'\x00'
+        io.values[BRIGHTNESS] = b'\xfe'
+        result = await Lamp(io, poll_interval=0).set_raw(
+            on=True, brightness_raw=76, deadline=time.monotonic()+2)
+        self.assertTrue(result['on'])
+        self.assertEqual(result['brightnessRaw'], 76)
 
     async def test_transition_and_protected_identity(self):
         io = FakeIo()

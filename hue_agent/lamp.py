@@ -59,19 +59,27 @@ class Lamp:
             await asyncio.sleep(min(self.poll_interval, remaining(until)))
 
     async def set_raw(self, *, on=None, brightness_raw=None, deadline, guard=None, mark_write_started=None):
+        if brightness_raw is not None and (type(brightness_raw) is not int or not 1 <= brightness_raw <= 254):
+            raise ValueError('INVALID_BRIGHTNESS')
+        if on is not None and type(on) is not bool:
+            raise ValueError('INVALID_POWER')
         initial = await self.read_state(deadline)
-        if brightness_raw is not None:
-            if type(brightness_raw) is not int or not 1 <= brightness_raw <= 254:
-                raise ValueError('INVALID_BRIGHTNESS')
+        need_brightness = brightness_raw is not None and initial['brightnessRaw'] != brightness_raw
+        need_power = on is not None and initial['on'] != on
+        if not need_brightness and not need_power:
+            if guard is not None:
+                guard()
+            return initial
+        if need_brightness:
             await self._write(BRIGHTNESS, bytes([brightness_raw]), deadline, guard, mark_write_started)
-        if on is not None:
-            if type(on) is not bool:
-                raise ValueError('INVALID_POWER')
+        if need_power:
             await self._write(POWER, bytes([int(on)]), deadline, guard, mark_write_started)
         # Power transitions also temporarily change brightness readback. Require the
         # combined final state, preserving remembered brightness on pure power writes.
         expected_raw = brightness_raw if brightness_raw is not None else initial['brightnessRaw']
         until = min(deadline, time.monotonic()+3)
+        power_on_turn = (not initial['on']) and (on is True) and (brightness_raw is not None)
+        rewrote_brightness = False
         while True:
             try:
                 state = await self.read_state(until)
@@ -81,6 +89,17 @@ class Lamp:
                 raise
             if (on is None or state['on'] == on) and state['brightnessRaw'] == expected_raw:
                 return state
+            if (
+                power_on_turn
+                and not rewrote_brightness
+                and state['on'] is True
+                and state['brightnessRaw'] == initial['brightnessRaw']
+                and state['brightnessRaw'] != expected_raw
+                and time.monotonic() + 0.5 < until
+            ):
+                rewrote_brightness = True
+                await self._write(BRIGHTNESS, bytes([brightness_raw]), until, guard, mark_write_started)
+                continue
             if time.monotonic() >= until:
                 raise RuntimeError('STATE_CHANGED_DURING_COMMAND')
             await asyncio.sleep(min(self.poll_interval, until-time.monotonic()))

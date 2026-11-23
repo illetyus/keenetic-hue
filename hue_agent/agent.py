@@ -11,15 +11,31 @@ from .events import emit
 
 
 class Controller:
-    def __init__(self, io, journal, session_id=None, probe_interval=30):
+    def __init__(self, io, journal, session_id=None, probe_interval=30, ready_wait_limit=2.0):
         self.io = io
         self.journal = journal
         self.session_id = session_id or str(uuid.uuid4())
         self.lock = asyncio.Lock()
         self.lamp = Lamp(io)
-        self.ready = False
+        self._ready = False
+        self._ready_event = asyncio.Event()
+        self._monitoring = False
         self.waiters = 0
         self.probe_interval = probe_interval
+        self.ready_wait_limit = ready_wait_limit
+
+    @property
+    def ready(self):
+        return self._ready
+
+    @ready.setter
+    def ready(self, value):
+        flag = bool(value)
+        self._ready = flag
+        if flag:
+            self._ready_event.set()
+        else:
+            self._ready_event.clear()
 
     def _finish_journal(self, command, result):
         try:
@@ -32,45 +48,49 @@ class Controller:
         last_ok = time.monotonic()
         failures = 0
         last_error = None
-        while True:
-            try:
-                if not self.ready or self.io.disconnected:
-                    async with self.lock:
-                        self.ready = False
-                    await self.io.connect()
-                    await self.lamp.identify()
-                    await self.lamp.read_state(time.monotonic()+5)
-                    async with self.lock:
-                        if self.io.disconnected:
-                            raise ConnectionError('BLE_DISCONNECTED')
-                        self.ready = True
-                    prior_failures = failures
-                    delay = 1
-                    failures = 0
-                    last_error = None
-                    last_ok = time.monotonic()
-                    emit('ble_ready', **({'recoveredAfter': prior_failures} if prior_failures else {}))
-                elif time.monotonic()-last_ok >= self.probe_interval and not self.lock.locked():
-                    async with self.lock:
-                        if self.ready and not self.io.disconnected:
-                            await self.lamp.read_state(time.monotonic()+5)
-                            last_ok = time.monotonic()
-                await asyncio.sleep(min(1, self.probe_interval))
-            except asyncio.CancelledError:
-                if asyncio.current_task().cancelling():
-                    raise
-                self.ready = False
-                await asyncio.sleep(delay)
-                delay = min(30, delay*2)
-            except Exception as error:
-                self.ready = False
-                error_name = type(error).__name__
-                failures += 1
-                if failures <= 6 or error_name != last_error or failures % 80 == 0:
-                    emit('ble_retry', errorType=error_name, retrySeconds=delay, **({'attempts': failures} if failures > 6 else {}))
-                last_error = error_name
-                await asyncio.sleep(delay+random.uniform(0, 0.2))
-                delay = min(30, delay*2)
+        self._monitoring = True
+        try:
+            while True:
+                try:
+                    if not self.ready or self.io.disconnected:
+                        async with self.lock:
+                            self.ready = False
+                        await self.io.connect()
+                        await self.lamp.identify()
+                        await self.lamp.read_state(time.monotonic()+5)
+                        async with self.lock:
+                            if self.io.disconnected:
+                                raise ConnectionError('BLE_DISCONNECTED')
+                            self.ready = True
+                        prior_failures = failures
+                        delay = 1
+                        failures = 0
+                        last_error = None
+                        last_ok = time.monotonic()
+                        emit('ble_ready', **({'recoveredAfter': prior_failures} if prior_failures else {}))
+                    elif time.monotonic()-last_ok >= self.probe_interval and not self.lock.locked():
+                        async with self.lock:
+                            if self.ready and not self.io.disconnected:
+                                await self.lamp.read_state(time.monotonic()+5)
+                                last_ok = time.monotonic()
+                    await asyncio.sleep(min(1, self.probe_interval))
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                    self.ready = False
+                    await asyncio.sleep(delay)
+                    delay = min(30, delay*2)
+                except Exception as error:
+                    self.ready = False
+                    error_name = type(error).__name__
+                    failures += 1
+                    if failures <= 6 or error_name != last_error or failures % 80 == 0:
+                        emit('ble_retry', errorType=error_name, retrySeconds=delay, **({'attempts': failures} if failures > 6 else {}))
+                    last_error = error_name
+                    await asyncio.sleep(delay+random.uniform(0, 0.2))
+                    delay = min(30, delay*2)
+        finally:
+            self._monitoring = False
 
     async def query(self):
         if not self.ready:
@@ -109,9 +129,20 @@ class Controller:
             remaining = command.expires_at-clock()
             if remaining <= 0:
                 raise ProtocolError('EXPIRED')
+            deadline = time.monotonic()+remaining
+            if not self.ready and self._monitoring:
+                wait_budget = min(self.ready_wait_limit, max(0.0, deadline - time.monotonic() - 1.5))
+                if wait_budget > 0:
+                    try:
+                        await asyncio.wait_for(self._ready_event.wait(), wait_budget)
+                    except TimeoutError:
+                        pass
+                if context is not None:
+                    context.require_current()
+                if time.monotonic() >= deadline:
+                    raise ProtocolError('EXPIRED')
             if not self.ready:
                 return {'commandId':command.command_id, 'status':'offline', 'errorCode':'BLE_OFFLINE'}
-            deadline = time.monotonic()+remaining
             await asyncio.wait_for(self.lock.acquire(), remaining)
             acquired = True
             if context is not None:
@@ -160,7 +191,8 @@ class Controller:
             result = {'commandId':getattr(command, 'command_id', None), 'status':'error', 'errorCode':'OUTCOME_UNKNOWN'}
             if reserved:
                 self._finish_journal(command, result)
-            self.ready = False
+            if not (isinstance(error, RuntimeError) and str(error) == 'STATE_CHANGED_DURING_COMMAND' and not getattr(self.io, 'disconnected', False)):
+                self.ready = False
             if isinstance(error, asyncio.CancelledError) and asyncio.current_task().cancelling():
                 raise
             return result
