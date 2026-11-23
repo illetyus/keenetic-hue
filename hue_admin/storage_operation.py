@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import tempfile
 import time
 import uuid
 
@@ -16,6 +17,9 @@ from .manifest import unique_object
 from .storage_journal import RamJournal
 from .storage_owner import launch_maintenance
 from .storage_session import prepare
+
+TMP_ROOT = Path('/tmp')
+OPERATION_PREFIX = 'hue-storage-operations-'
 
 
 def summarize(state, code, alive):
@@ -87,11 +91,75 @@ def _write(directory, name, value):
         os.close(root)
 
 
-def start(io, root=Path('/tmp/hue-storage-operations'), *, origin_tokens=None):
+def _is_root_private_dir(info):
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700
+
+
+def _match_operation_child(entry, identifier):
+    if entry.is_symlink():
+        return None
+    if hasattr(os, 'O_DIRECTORY') and hasattr(os, 'O_NOFOLLOW'):
+        try:
+            parent_fd = os.open(entry, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError:
+            return None
+        try:
+            if not _is_root_private_dir(os.fstat(parent_fd)):
+                return None
+            child_fd = os.open(identifier, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+            try:
+                if not _is_root_private_dir(os.fstat(child_fd)):
+                    return None
+            finally:
+                os.close(child_fd)
+        except OSError:
+            return None
+        finally:
+            os.close(parent_fd)
+        return entry / identifier
+    try:
+        if not _is_root_private_dir(entry.lstat()):
+            return None
+        candidate = entry / identifier
+        if candidate.is_symlink() or not _is_root_private_dir(candidate.lstat()):
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
+def _tmp_base():
+    base = Path(TMP_ROOT).absolute()
+    if base.is_symlink() or any(p.is_symlink() for p in base.parents):
+        raise ValueError('STORAGE_RAM_JOURNAL_PATH')
+    return base
+
+
+def _find_operation_directory(identifier):
+    """Locate a root-owned 0700 RAM operation directory under TMP_ROOT without following symlinks."""
+    base = _tmp_base()
+    matches = []
+    for entry in base.iterdir():
+        if not entry.name.startswith(OPERATION_PREFIX):
+            continue
+        match = _match_operation_child(entry, identifier)
+        if match is not None:
+            matches.append(match)
+    if not matches:
+        raise FileNotFoundError(identifier)
+    if len(matches) > 1:
+        raise ValueError('STORAGE_OPERATION_AMBIGUOUS')
+    return matches[0]
+
+
+def start(io, root=None, *, origin_tokens=None):
     """Internal trusted call. Started PID is not completion proof."""
     import fcntl
-    root=Path(root).absolute()
-    root.mkdir(mode=0o700,exist_ok=True)
+    if root is None:
+        root=Path(tempfile.mkdtemp(prefix=OPERATION_PREFIX,dir=_tmp_base())).absolute()
+    else:
+        root=Path(root).absolute()
+        root.mkdir(mode=0o700,exist_ok=True)
     directory_fd=RamJournal(root)._directory()
     try:lock=os.open('launch.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600,dir_fd=directory_fd)
     finally:os.close(directory_fd)
@@ -103,6 +171,7 @@ def start(io, root=Path('/tmp/hue-storage-operations'), *, origin_tokens=None):
         except BlockingIOError:raise RuntimeError('STORAGE_OPERATION_BUSY') from None
         tokens=origins(io) if origin_tokens is None else origin_tokens
         identifier=str(uuid.uuid4());directory=root/identifier;directory.mkdir(mode=0o700)
+        directory.chmod(0o700)
         journal=RamJournal(directory)
         meta={'schema':1,'bootId':boot_id(),'operationId':identifier,'guardian':None}
         _write(directory,'owner.json',meta)
@@ -146,7 +215,7 @@ def dispatch(arguments, runtime, factory):
         try:valid=str(uuid.UUID(identifier))==identifier
         except ValueError:valid=False
         if not valid:raise ValueError('STORAGE_OPERATION_ARGUMENTS')
-        return status(Path('/tmp/hue-storage-operations')/identifier)
+        return status(_find_operation_directory(identifier))
     if arguments not in ([],['prepare'],['start']):raise ValueError('STORAGE_OPERATION_ARGUMENTS')
     with prepare(runtime,factory) as io:
         if arguments==['start']:return start(io)
