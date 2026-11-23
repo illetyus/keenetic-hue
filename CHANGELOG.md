@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0-rc.20 — 2026-11-23
+
+Code commit `bd0a799`. RAM operation directory and verified tunnel readiness
+probe hardening across `hue_admin/storage_operation.py`, `hue_admin/health.py`,
+and `hue_admin/unified_health.py`, verified with 26 targeted tests (`2` POSIX
+root fixtures skipped on Windows), 91 portable Python tests, 574 discovered
+tests (`433` passing, `141` Windows-skipped native Linux/POSIX/root checks),
+`tools/check_publication.py`, and live router acceptance on
+`keenetic-hue-0.2.0-rc.20.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.20"`). [Release notes](docs/releases/0.2.0-rc.20.md).
+
+- Replaced the fixed `/tmp/hue-storage-operations` base directory in
+  `hue_admin/storage_operation.py` `start()` and `dispatch()` with randomized
+  `0o700` root-only directories via `tempfile.mkdtemp(prefix='hue-storage-operations-', dir=_tmp_base())`
+  and `O_DIRECTORY | O_NOFOLLOW` lookup (`_find_operation_directory()`),
+  preserving `/tmp` (`tmpfs`) independence from `/opt` while preventing local
+  pre-creation DoS (`tests/test_storage_operation.py`).
+- Added `verified_probe()` (sharing `_verified_probe()`) in
+  `hue_admin/health.py` and switched the `127.0.0.1:18790/ready` probe in
+  `hue_admin/unified_health.py` and legacy `health.py` to enforce
+  `verify_tcp_peer()` socket matching, `verify_process_identity()` UID/GID
+  checks, and fail-closed `peer_guard` validation before sending HTTP `GET`
+  (`tests/test_health_peer.py`, `tests/test_unified_health.py`).
+
 ## 0.2.0-rc.19 — 2026-11-14
 
 Code commit `ececa49`. SQLite rollback sidecar (`-wal`, `-shm`, `-journal`)
