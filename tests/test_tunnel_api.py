@@ -59,6 +59,12 @@ class TunnelApiTests(unittest.IsolatedAsyncioTestCase):
         response=await get('Authorization: Bearer '+'x'*64+'\r\n')
         self.assertIn(b'200 OK',response)
         self.assertIn(self.api.context.session_id.encode(),response)
+    async def test_accepts_seven_second_set_deadline_and_still_rejects_long_deadline(self):
+        ok=await self.api.controller.execute(payload(sessionId=self.api.context.session_id,expiresAt=time.time()+7))
+        self.assertEqual(ok['status'],'verified')
+        bad=await self.api.controller.execute(payload(commandId='cmd2',sequence=2,sessionId=self.api.context.session_id,expiresAt=time.time()+20))
+        self.assertEqual(bad['errorCode'],'INVALID_COMMAND')
+
     async def test_oversized_or_non_string_command_id_is_not_echoed_on_parse_error(self):
         for bad in (123, 'x'*200):
             result=await self.api.controller.execute(payload(commandId=bad,sessionId=self.api.context.session_id))

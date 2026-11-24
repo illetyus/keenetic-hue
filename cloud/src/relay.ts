@@ -169,20 +169,33 @@ export class Relay extends DurableObject<Env>{
     if(!this.oauthGrantAllowed(oauthGrantId))return offline('GRANT_REVOKED');
     this.cleanQueries();
     if(this.full(input)||this.pending.size>=16)return Response.json({commandId:input.requestId,status:'error',errorCode:'BUSY'},{status:503});
-    const signal=AbortSignal.timeout(6000);
+    const timeoutMs=input.operation==='set'?8000:6000;
+    const signal=AbortSignal.timeout(timeoutMs);
     const options={headers:{Authorization:'Bearer '+this.env.DEVICE_TOKEN},redirect:'manual' as const,signal};
-    let sessionId:string;let deviceTime=0;let deviceOffset=0;
-    const sessionStart=performance.now();const cloudStart=Date.now()/1000;
-    try{
-      const response=await this.env.HUE_TUNNEL!.fetch('http://127.0.0.1:8788/v1/session',options);
-      if(response.status!==200)throw Error('Session unavailable');
-      const session=object(await this.tunnelBody(response),['sessionId','serverTime']);
-      if(typeof session.sessionId!=='string'||!session.sessionId.length||session.sessionId.length>128||typeof session.serverTime!=='number'||!Number.isFinite(session.serverTime)||session.serverTime<=0)throw Error('Invalid session');
-      const roundTrip=(performance.now()-sessionStart)/1000;
-      if(roundTrip>1)return offline('CLOCK_UNCERTAIN');
-      deviceTime=session.serverTime;deviceOffset=cloudStart+roundTrip/2-deviceTime;
-      sessionId=session.sessionId;
-    }catch{return offline('TUNNEL_OFFLINE');}
+    let sessionId='';let deviceTime=0;let deviceOffset=0;
+    let sessionStart=0;
+    for(let attempt=0;attempt<2;attempt++){
+      sessionStart=performance.now();const cloudStart=Date.now()/1000;
+      try{
+        const response=await this.env.HUE_TUNNEL!.fetch('http://127.0.0.1:8788/v1/session',options);
+        if(response.status===401)return offline('TUNNEL_OFFLINE');
+        if(response.status!==200)throw Error('Session unavailable');
+        const session=object(await this.tunnelBody(response),['sessionId','serverTime']);
+        if(typeof session.sessionId!=='string'||!session.sessionId.length||session.sessionId.length>128||typeof session.serverTime!=='number'||!Number.isFinite(session.serverTime)||session.serverTime<=0)throw Error('Invalid session');
+        const roundTrip=(performance.now()-sessionStart)/1000;
+        if(roundTrip>2.5){
+          if(attempt===0&&!signal.aborted)continue;
+          return offline('CLOCK_UNCERTAIN');
+        }
+        deviceTime=session.serverTime;deviceOffset=cloudStart+roundTrip/2-deviceTime;
+        sessionId=session.sessionId;
+        break;
+      }catch{
+        if(attempt===0&&!signal.aborted)continue;
+        return offline('TUNNEL_OFFLINE');
+      }
+    }
+    if(!sessionId)return offline('TUNNEL_OFFLINE');
     // Recheck after the network await: another request or revocation may have won.
     if(await this.ctx.storage.get<boolean>('revoked')){
       const revokedFingerprint=await this.ctx.storage.get<string>('revokedFingerprint');

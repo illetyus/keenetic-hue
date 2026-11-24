@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import AsyncExitStack
 
+from .events import emit
 from .lamp import POWER, BRIGHTNESS, MODEL, MANUFACTURER
 
 
@@ -8,18 +9,63 @@ class BleIo:
     def __init__(self, config):
         self.config = config
         self.stack = None
+        self.device = None
         self.connection = None
         self.peer = None
         self.characteristics = {}
         self.disconnected = True
+        self._can_reuse_device = False
+
+    async def _connect_ble(self):
+        from bumble.core import UUID
+        from bumble.device import Peer
+        from bumble.hci import OwnAddressType
+
+        self.connection = None
+        self.peer = None
+        self.characteristics = {}
+        self.connection = await asyncio.wait_for(self.device.connect(
+            self.config['address'], own_address_type=OwnAddressType.PUBLIC), 15)
+        self.disconnected = False
+        self.connection.on(self.connection.EVENT_DISCONNECTION, self._disconnected)
+        await asyncio.wait_for(self.connection.encrypt(), 10)
+        if not self.connection.is_encrypted:
+            raise ConnectionError('ENCRYPTION_REQUIRED')
+        self.peer = Peer(self.connection)
+        control = UUID('932C32BD-0000-47A2-835A-A8D455B859DD')
+        info = UUID('180A')
+        services = await asyncio.wait_for(self.peer.discover_services([control, info]), 10)
+        for service_uuid, fields in ((control, (POWER, BRIGHTNESS)), (info, (MODEL, MANUFACTURER))):
+            matches = [s for s in services if s.uuid == service_uuid]
+            if len(matches) != 1:
+                raise ValueError('SERVICE_MISSING')
+            service = matches[0]
+            await asyncio.wait_for(self.peer.discover_characteristics([UUID(u) for u in fields], service=service), 10)
+            for field in fields:
+                matches = self.peer.get_characteristics_by_uuid(UUID(field), service)
+                if len(matches) != 1:
+                    raise ValueError('CHARACTERISTIC_MISSING')
+                self.characteristics[field] = matches[0]
 
     async def connect(self):
-        from bumble.core import UUID
-        from bumble.device import Device, Peer
-        from bumble.hci import OwnAddressType
+        if self._can_reuse_device and self.device is not None and self.stack is not None and self.disconnected:
+            self._can_reuse_device = False
+            try:
+                await self._connect_ble()
+                self._can_reuse_device = True
+                return
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    await self.close()
+                    raise
+            except Exception as error:
+                emit('ble_fast_reconnect_fallback', errorType=type(error).__name__)
+
+        await self.close()
+        from bumble.device import Device
         from bumble.keys import JsonKeyStore
         from bumble.transport import open_transport
-        await self.close()
         self.stack = AsyncExitStack()
         try:
             transport = await asyncio.wait_for(open_transport(self.config['transport']), 10)
@@ -31,34 +77,16 @@ class BleIo:
             if str(device.public_address) != self.config['controller_public_address']:
                 raise ValueError('CONTROLLER_IDENTITY_CHANGED')
             device.keystore = JsonKeyStore.from_device(device, filename=self.config['keystore'])
-            self.connection = await asyncio.wait_for(device.connect(
-                self.config['address'], own_address_type=OwnAddressType.PUBLIC), 15)
-            self.disconnected = False
-            self.connection.on(self.connection.EVENT_DISCONNECTION, self._disconnected)
-            await asyncio.wait_for(self.connection.encrypt(), 10)
-            if not self.connection.is_encrypted:
-                raise ConnectionError('ENCRYPTION_REQUIRED')
-            self.peer = Peer(self.connection)
-            control = UUID('932C32BD-0000-47A2-835A-A8D455B859DD')
-            info = UUID('180A')
-            services = await asyncio.wait_for(self.peer.discover_services([control, info]), 10)
-            for service_uuid, fields in ((control, (POWER, BRIGHTNESS)), (info, (MODEL, MANUFACTURER))):
-                matches = [s for s in services if s.uuid == service_uuid]
-                if len(matches) != 1:
-                    raise ValueError('SERVICE_MISSING')
-                service = matches[0]
-                await asyncio.wait_for(self.peer.discover_characteristics([UUID(u) for u in fields], service=service), 10)
-                for field in fields:
-                    matches = self.peer.get_characteristics_by_uuid(UUID(field), service)
-                    if len(matches) != 1:
-                        raise ValueError('CHARACTERISTIC_MISSING')
-                    self.characteristics[field] = matches[0]
+            self.device = device
+            await self._connect_ble()
+            self._can_reuse_device = True
         except BaseException:
             await self.close()
             raise
 
     def _disconnected(self, reason):
         self.disconnected = True
+        emit('ble_disconnected', reason=int(reason) if isinstance(reason, int) else type(reason).__name__)
 
     def _check(self, uuid):
         if self.disconnected or self.connection is None or not self.connection.is_encrypted:
@@ -90,6 +118,8 @@ class BleIo:
                     pass
         finally:
             self.disconnected = True
+            self._can_reuse_device = False
+            self.device = None
             self.connection = None
             self.peer = None
             self.characteristics = {}

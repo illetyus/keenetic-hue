@@ -67,3 +67,32 @@ it('queries and reports actual state after OUTCOME_UNKNOWN when no writes remain
   expect(reports).toEqual([{online:true,on:true,brightness:55}]);
  });
 });
+
+it('retries pre-delivery offline once with fresh id without reporting offline, and never retries OUTCOME_UNKNOWN',async()=>{
+ const {stub,identity}=await linked();
+ await runInDurableObject(stub,async(instance:any,state)=>{
+  instance.env.GOOGLE_QUEUE_ENABLED='true';instance.env.REPORT_STATE_ENABLED='true';instance.env.HOMEGRAPH_SERVICE_ACCOUNT='fixture';
+  const calls:any[]=[],reports:any[]=[];
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(c:any)=>{
+   calls.push(c);
+   if(calls.length===1)return Response.json({commandId:c.requestId,status:'offline',errorCode:'CLOCK_UNCERTAIN'});
+   return Response.json({commandId:c.requestId,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:45,brightnessRaw:114,observedAt:Date.now()/1000});
+  }})};
+  instance.reporter={report:async(_owner:string,s:any)=>reports.push(s)};
+  expect(await instance.submitCommands(identity.grantId,'retry-1',[{brightness:45}])).toEqual({accepted:true});
+  await instance.alarm();await state.storage.deleteAlarm();
+  expect(calls).toHaveLength(1);expect(reports).toEqual([]);
+  await instance.alarm();await state.storage.deleteAlarm();
+  expect(calls).toHaveLength(2);expect(calls[1].requestId).not.toBe(calls[0].requestId);
+  expect(reports).toEqual([{online:true,on:true,brightness:45}]);
+  calls.length=0;reports.length=0;
+  instance.env.HUE_RELAY={getByName:()=>({execute:async(c:any)=>{
+   calls.push(c);
+   if(c.operation==='set')return Response.json({commandId:c.requestId,status:'error',errorCode:'OUTCOME_UNKNOWN'});
+   return Response.json({commandId:c.requestId,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:45,brightnessRaw:114,observedAt:Date.now()/1000});
+  }})};
+  expect(await instance.submitCommands(identity.grantId,'unk-no-retry',[{brightness:65}])).toEqual({accepted:true});
+  await instance.alarm();await state.storage.deleteAlarm();
+  expect(calls.map(c=>c.operation)).toEqual(['set','query']);
+ });
+});

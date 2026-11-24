@@ -13,6 +13,7 @@ describe('strict cross-language protocol',()=>{
     expect(()=>controlInput({...base,operation:'query',expiresAt:9e99})).toThrow();
     expect(()=>wireCommand({...base,operation:'query'},'s',2**53,100)).toThrow();
     expect(wireCommand({...base,operation:'query'},'s',1,100).expiresAt).toBe(105);
+    expect(wireCommand({...base,operation:'set',on:true},'s',2,100).expiresAt).toBe(107);
   });
   it('does not accept malformed/fabricated successful states',()=>{
     expect(()=>verifiedResult({status:'verified',commandId:requestId,on:true}, requestId)).toThrow();

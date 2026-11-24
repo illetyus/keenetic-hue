@@ -17,7 +17,7 @@ class TunnelController:
     async def execute(self, data):
         try:
             command = Command.parse(data, self.context.session_id, allow_expired=True)
-            if not 1 <= command.sequence <= 2**53-1 or command.expires_at > time.time()+6:
+            if not 1 <= command.sequence <= 2**53-1 or command.expires_at > time.time()+9:
                 raise ProtocolError('INVALID_COMMAND')
         except ProtocolError as error:
             cid=data.get('commandId') if isinstance(data,dict) else None
