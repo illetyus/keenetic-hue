@@ -10,6 +10,8 @@ from .protocol import ProtocolError
 
 class Journal:
     """Reserve before BLE writes; an interrupted reservation never replays writes."""
+    _MAX_SESSION_SEQUENCES = 256
+
     def __init__(self, path):
         self.wall_anchor=time.time();self.mono_anchor=time.monotonic()
         self._mem_lock = threading.Lock()
@@ -19,6 +21,7 @@ class Journal:
         self._queries = {}
         self._mem_writes = {}
         self._session_sequences = {}
+        self._session_seq_ts = {}
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.execute('PRAGMA journal_mode=PERSIST')
         self.db.execute('PRAGMA synchronous=FULL')
@@ -27,14 +30,22 @@ class Journal:
         self.db.execute('CREATE TABLE IF NOT EXISTS sequences (session TEXT PRIMARY KEY, last INTEGER, created REAL)')
         self.db.commit()
         now = self.retention_now()
+        with self.db:
+            self.db.execute('UPDATE commands SET created=? WHERE created>?', (now, now))
+            self.db.execute('UPDATE sequences SET created=? WHERE created>?', (now, now))
         for row_id, row_hash, row_result, created in self.db.execute(
             "SELECT id, hash, result, created FROM commands WHERE created>? AND hash NOT LIKE 'query:%'",
             (now - 1800,),
         ):
             parsed = json.loads(row_result) if row_result else None
-            self._mem_writes[row_id] = (row_hash, parsed, created)
-        for session_id, last_seq in self.db.execute('SELECT session, last FROM sequences'):
-            self._session_sequences[session_id] = last_seq
+            clamped = min(created, now) if created is not None else now
+            self._mem_writes[row_id] = (row_hash, parsed, clamped)
+        for session_id, last_seq, created in self.db.execute(
+            'SELECT session, last, created FROM sequences WHERE created IS NULL OR created>? ORDER BY created ASC',
+            (now - 1800,),
+        ):
+            clamped = min(created, now) if created is not None else now
+            self._record_session_seq_locked(session_id, last_seq, clamped)
 
     def retention_now(self):
         return self.wall_anchor+time.monotonic()-self.mono_anchor
@@ -45,17 +56,42 @@ class Journal:
                 self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='hue-journal')
             return self._executor
 
-    def _prune_memory_locked(self, now):
+    def _record_session_seq_locked(self, session_id, sequence, now):
+        self._session_sequences.pop(session_id, None)
+        self._session_sequences[session_id] = sequence
+        self._session_seq_ts.pop(session_id, None)
+        self._session_seq_ts[session_id] = now
+        while len(self._session_sequences) > self._MAX_SESSION_SEQUENCES:
+            evict_key = next((k for k in self._session_sequences if k != session_id), None)
+            if evict_key is None:
+                break
+            del self._session_sequences[evict_key]
+            self._session_seq_ts.pop(evict_key, None)
+
+    def _prune_memory_locked(self, now, active_session=None):
         stale_queries = [k for k, v in self._queries.items() if v[2] < now - 30]
         for k in stale_queries:
             del self._queries[k]
         stale_writes = [k for k, v in self._mem_writes.items() if v[2] < now - 1800]
         for k in stale_writes:
             del self._mem_writes[k]
+        stale_sessions = [
+            k for k, ts in self._session_seq_ts.items()
+            if k != active_session and ts < now - 1800
+        ]
+        for k in stale_sessions:
+            self._session_sequences.pop(k, None)
+            del self._session_seq_ts[k]
+        while len(self._session_sequences) > self._MAX_SESSION_SEQUENCES:
+            evict_key = next((k for k in self._session_sequences if k != active_session), None)
+            if evict_key is None:
+                break
+            del self._session_sequences[evict_key]
+            self._session_seq_ts.pop(evict_key, None)
 
     def _lookup_mem_locked(self, command, *, include_pending=True):
         now = self.retention_now()
-        self._prune_memory_locked(now)
+        self._prune_memory_locked(now, active_session=command.session_id)
         expected=('query:' if command.operation=='query' else '')+command.fingerprint
         entry = self._queries.get(command.command_id)
         if entry is not None:
@@ -114,17 +150,17 @@ class Journal:
                 raise ProtocolError('STALE_SEQUENCE')
             now = self.retention_now()
             if command.operation=='query':
-                self._session_sequences[command.session_id] = command.sequence
-                self._prune_memory_locked(now)
+                self._prune_memory_locked(now, active_session=command.session_id)
+                self._record_session_seq_locked(command.session_id, command.sequence, now)
                 while len(self._queries) >= 64:
                     oldest_key = next(iter(self._queries))
                     del self._queries[oldest_key]
                 self._queries[command.command_id] = ('query:'+command.fingerprint, None, now)
                 return None
-            self._prune_memory_locked(now)
+            self._prune_memory_locked(now, active_session=command.session_id)
             if len(self._mem_writes) >= 256:
                 raise ProtocolError('BUSY')
-            self._session_sequences[command.session_id] = command.sequence
+            self._record_session_seq_locked(command.session_id, command.sequence, now)
             self._mem_writes[command.command_id] = (command.fingerprint, None, now)
         self._get_executor().submit(self._persist_reserve, command, now, on_error)
         return None
@@ -157,8 +193,8 @@ class Journal:
                 raise ProtocolError('STALE_SEQUENCE')
             if command.operation=='query':
                 with self._mem_lock:
-                    self._session_sequences[command.session_id] = command.sequence
-                    self._prune_memory_locked(now)
+                    self._prune_memory_locked(now, active_session=command.session_id)
+                    self._record_session_seq_locked(command.session_id, command.sequence, now)
                     while len(self._queries) >= 64:
                         oldest_key = next(iter(self._queries))
                         del self._queries[oldest_key]
@@ -174,7 +210,8 @@ class Journal:
                 self.db.execute('INSERT OR REPLACE INTO sequences VALUES (?,?,?)', (command.session_id,command.sequence,now))
                 self.db.execute('INSERT INTO commands VALUES (?,?,NULL,?)', (command.command_id, command.fingerprint, now))
             with self._mem_lock:
-                self._session_sequences[command.session_id] = command.sequence
+                self._prune_memory_locked(now, active_session=command.session_id)
+                self._record_session_seq_locked(command.session_id, command.sequence, now)
                 self._mem_writes[command.command_id] = (command.fingerprint, None, now)
             return None
 
