@@ -207,8 +207,8 @@ export class AuthStore extends DurableObject<Env>{
     if(schedule)await this.scheduleSoon(1000);return {queued:true};
   }
   async alarm(){
-    await this.drainCommand();
-    if(this.commands.status().pending){await this.scheduleSoon(100);return;}
+    const retryDelay=await this.drainCommand();
+    if(this.commands.status().pending){await this.scheduleSoon(retryDelay??100);return;}
     await this.reportExclusive(()=>this.sendPendingReport());
     if(this.commands.status().pending)await this.scheduleSoon(100);
   }
@@ -222,19 +222,22 @@ export class AuthStore extends DurableObject<Env>{
     await this.scheduleSoon(100);return {accepted:true};
   }
   async commandStatus(){return {enabled:this.env.GOOGLE_QUEUE_ENABLED==='true',...this.commands.status()};}
-  private async drainCommand(){
-    if(this.commandActive)return;
+  private async drainCommand():Promise<number|null>{
+    if(this.commandActive)return null;
     this.commandActive=true;
     try{
-      const job=this.commands.claim(this.currentGrant()?.id,now());if(!job)return;
-      if(this.env.GOOGLE_QUEUE_ENABLED!=='true'||job.expires-now()<7||this.currentGrant()?.id!==job.grant){this.commands.finish(job.id,'EXPIRED',now());return;}
+      const job=this.commands.claim(this.currentGrant()?.id,now());if(!job)return null;
+      if(this.env.GOOGLE_QUEUE_ENABLED!=='true'||job.expires-now()<7||this.currentGrant()?.id!==job.grant){this.commands.finish(job.id,'EXPIRED',now());return null;}
       let outcome='OUTCOME_UNKNOWN';
       try{
         const response=await this.env.HUE_RELAY.getByName(DEVICE_ID).execute({requestId:job.id,deviceId:DEVICE_ID,operation:'set',...job.fields},{kind:'google',grantId:job.grant});
         if(response.status===200){
           const result=verifiedResult(await response.json(),job.id);outcome=result.errorCode??result.status;
           if(result.status==='verified')await this.enqueueReport(job.grant,{online:true,on:result.on,brightness:result.brightness,observedAt:result.observedAt!},false,false);
-          else if(result.status==='offline')await this.enqueueReport(job.grant,{online:false,observedAt:now()},false,false);
+          else if(result.status==='offline'){
+            if((result.errorCode==='CLOCK_UNCERTAIN'||result.errorCode==='BLE_OFFLINE')&&this.commands.requeuePreDelivery(job,now()))return 1500;
+            if(!this.commands.status().pending)await this.enqueueReport(job.grant,{online:false,observedAt:now()},false,false);
+          }
         }
       }catch{/* Claimed operations are never replayed after an uncertain delivery. */}
       this.commands.finish(job.id,outcome,now());
@@ -249,6 +252,7 @@ export class AuthStore extends DurableObject<Env>{
           }
         }catch{/* Best-effort state sync after uncertain write outcome. */}
       }
+      return null;
     }finally{this.commandActive=false;}
   }
   private async sendPendingReport(force=false){

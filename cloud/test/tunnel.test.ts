@@ -144,3 +144,32 @@ it('Tunnel keeps revoked state if rotated credential is rejected by router sessi
   expect(rollback.errorCode).toBe('AGENT_REVOKED');
  });
 });
+it('Tunnel retries transient slow /v1/session once and returns CLOCK_UNCERTAIN if both exceed 2.5s',async()=>{
+ const stub=bindings.HUE_RELAY.getByName('tunnel-session-retry');
+ await runInDurableObject(stub,async(instance:any)=>{
+  let sessionCalls=0;
+  let nowMs=1_000_000;
+  const origPerf=performance.now;
+  performance.now=()=>nowMs;
+  try{
+   instance.env.HUE_TUNNEL={fetch:async(url:string,init:any)=>{
+    if(url.endsWith('/v1/session')){
+     sessionCalls++;
+     nowMs+=(sessionCalls===1?2600:50);
+     return Response.json({sessionId:'retry-ok',serverTime:Date.now()/1000});
+    }
+    const c=JSON.parse(init.body);
+    return Response.json({commandId:c.commandId,status:'verified',deviceId:'hue-lwa017-01',on:true,brightness:50,brightnessRaw:127,observedAt:Date.now()/1000});
+   }};
+   const ok=await (await instance.execute({requestId:crypto.randomUUID(),deviceId:'hue-lwa017-01',operation:'query'},{kind:'operator'})).json();
+   expect(ok.status).toBe('verified');expect(sessionCalls).toBe(2);
+   sessionCalls=0;
+   instance.env.HUE_TUNNEL={fetch:async(url:string)=>{
+    if(url.endsWith('/v1/session')){sessionCalls++;nowMs+=2600;return Response.json({sessionId:'slow',serverTime:Date.now()/1000});}
+    throw Error('must not deliver');
+   }};
+   const slow=await (await instance.execute({requestId:crypto.randomUUID(),deviceId:'hue-lwa017-01',operation:'query'},{kind:'operator'})).json();
+   expect(slow.errorCode).toBe('CLOCK_UNCERTAIN');expect(sessionCalls).toBe(2);
+  }finally{performance.now=origPerf;}
+ });
+});

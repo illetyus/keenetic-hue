@@ -23,7 +23,8 @@ export function wireCommand(input:ControlInput,sessionId:string,sequence:number,
   controlInput(input);
   if(!Number.isSafeInteger(sequence)||sequence<1)throw new ProtocolError('INVALID_SEQUENCE');
   const {requestId,...fields}=input;
-  return {commandId:requestId,...fields,sessionId,sequence,expiresAt:now+5};
+  const ttl=input.operation==='set'?7:5;
+  return {commandId:requestId,...fields,sessionId,sequence,expiresAt:now+ttl};
 }
 export function logicalKey(input:ControlInput):string{
   return JSON.stringify([input.deviceId,input.operation,input.on??null,input.brightness??null]);

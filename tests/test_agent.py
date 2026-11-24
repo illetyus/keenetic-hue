@@ -404,3 +404,83 @@ class ControllerTests(unittest.IsolatedAsyncioTestCase):
         result = await self.agent.execute(payload(expiresAt=time.time()+5))
         self.assertEqual(result['errorCode'], 'OUTCOME_UNKNOWN')
         self.assertTrue(self.agent.ready)
+
+    async def test_slow_journal_reserve_does_not_block_event_loop(self):
+        orig_persist = self.journal._persist_reserve
+        def slow_persist(command, now, on_error=None):
+            time.sleep(0.35)
+            return orig_persist(command, now, on_error)
+        self.journal._persist_reserve = slow_persist
+        t0 = time.monotonic()
+        result = await self.agent.execute(payload(expiresAt=time.time()+5))
+        elapsed = time.monotonic() - t0
+        self.assertEqual(result['status'], 'verified')
+        self.assertLess(elapsed, 0.15)
+        await self.journal.flush_async()
+        row = self.journal.db.execute('SELECT result FROM commands WHERE id=?', ('cmd1',)).fetchone()
+        self.assertEqual(json.loads(row[0])['status'], 'verified')
+
+    async def test_pre_ble_timeout_preserves_ready_link(self):
+        self.io.disconnected = False
+        orig_reserve = self.journal.reserve_fast
+        def expiring_reserve(command, on_error=None):
+            time.sleep(0.08)
+            return orig_reserve(command, on_error=on_error)
+        self.journal.reserve_fast = expiring_reserve
+        result = await self.agent.execute(payload(expiresAt=time.time()+0.04))
+        self.assertEqual(result['errorCode'], 'OUTCOME_UNKNOWN')
+        self.assertTrue(self.agent.ready)
+
+    async def test_consecutive_sets_do_not_block_on_first_set_disk_fsync(self):
+        orig_persist = self.journal._persist_reserve
+        def slow_persist(command, now, on_error=None):
+            time.sleep(0.30)
+            return orig_persist(command, now, on_error)
+        self.journal._persist_reserve = slow_persist
+        t0 = time.monotonic()
+        r1 = await self.agent.execute(payload(commandId='cmd-a', sequence=1, brightness=30, expiresAt=time.time()+5))
+        r2 = await self.agent.execute(payload(commandId='cmd-b', sequence=2, brightness=70, expiresAt=time.time()+5))
+        elapsed = time.monotonic() - t0
+        self.assertEqual(r1['status'], 'verified')
+        self.assertEqual(r2['status'], 'verified')
+        self.assertLess(elapsed, 0.15)
+        await self.journal.flush_async()
+        rows = self.journal.db.execute('SELECT id, result FROM commands ORDER BY id').fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([json.loads(r[1])['status'] for r in rows], ['verified', 'verified'])
+
+    async def test_ble_io_reuses_device_after_clean_disconnect_and_falls_back_on_error(self):
+        io = BleIo({'address': 'C5:E7:47:97:CE:E7'})
+        calls = []
+        class FakeStack:
+            async def aclose(self):
+                pass
+        io.stack = FakeStack()
+        io.device = object()
+        io.disconnected = True
+        io._can_reuse_device = True
+        async def fast_ok():
+            calls.append('fast')
+            io.disconnected = False
+        io._connect_ble = fast_ok
+        await io.connect()
+        self.assertEqual(calls, ['fast'])
+        self.assertTrue(io._can_reuse_device)
+        io._disconnected(8)
+        self.assertTrue(io.disconnected)
+        async def fast_fail():
+            calls.append('fast_fail')
+            raise TimeoutError('hang')
+        io._connect_ble = fast_fail
+        orig_close = io.close
+        closed = False
+        async def tracked_close():
+            nonlocal closed
+            closed = True
+            await orig_close()
+        io.close = tracked_close
+        with patch.dict('sys.modules', {'bumble': None}):
+            with self.assertRaises(ModuleNotFoundError):
+                await io.connect()
+        self.assertTrue(closed)
+        self.assertEqual(calls, ['fast', 'fast_fail'])

@@ -1,8 +1,8 @@
 import {controlInput,DEVICE_ID} from './protocol';
 
 export type DesiredField={on:boolean}|{brightness:number};
-export type QueuedCommand={id:string;grant:string;fields:DesiredField;expires:number};
-type Row={id:string;grant_id:string;fields:string;expires:number;phase:string;barrier:number};
+export type QueuedCommand={id:string;grant:string;fields:DesiredField;expires:number;attempts:number};
+type Row={seq?:number;id:string;grant_id:string;fields:string;expires:number;phase:string;barrier:number;attempts?:number};
 type Admission='accepted'|'duplicate'|'conflict'|'busy'|'revoked';
 async function hash(value:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');}
 
@@ -10,7 +10,8 @@ async function hash(value:string){return Array.from(new Uint8Array(await crypto.
 export class CommandQueue{
  constructor(private state:DurableObjectState){
   const sql=state.storage.sql;
-  sql.exec('CREATE TABLE IF NOT EXISTS desired_jobs(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT,grant_id TEXT,fields TEXT,expires REAL,phase TEXT,barrier INTEGER)');
+  sql.exec('CREATE TABLE IF NOT EXISTS desired_jobs(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT,grant_id TEXT,fields TEXT,expires REAL,phase TEXT,barrier INTEGER,attempts INTEGER NOT NULL DEFAULT 0)');
+  try{sql.exec('ALTER TABLE desired_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');}catch{}
   sql.exec('CREATE TABLE IF NOT EXISTS desired_receipts(key TEXT PRIMARY KEY,fingerprint TEXT,expires REAL)');
   sql.exec('CREATE TABLE IF NOT EXISTS desired_health(id INTEGER PRIMARY KEY,outcome TEXT,at REAL)');
   sql.exec('CREATE TABLE IF NOT EXISTS desired_rate(id INTEGER PRIMARY KEY,started REAL,count INTEGER)');
@@ -42,8 +43,8 @@ export class CommandQueue{
    if(rows.length+(merge?0:fields.length)>16)return 'busy';
    if(!rate||now-rate.started>=60)sql.exec('INSERT OR REPLACE INTO desired_rate VALUES(1,?,1)',now);else sql.exec('UPDATE desired_rate SET count=count+1 WHERE id=1');
    sql.exec('INSERT INTO desired_receipts VALUES(?,?,?)',key,fingerprint,now+1800);
-   if(merge)sql.exec("UPDATE desired_jobs SET id=?,fields=?,expires=? WHERE id=?",crypto.randomUUID(),JSON.stringify(fields[0]),now+15,last.id);
-   else for(const field of fields)sql.exec("INSERT INTO desired_jobs(id,grant_id,fields,expires,phase,barrier) VALUES(?,?,?,?,'waiting',?)",crypto.randomUUID(),grant,JSON.stringify(field),now+15,fields.length>1?1:0);
+   if(merge)sql.exec("UPDATE desired_jobs SET id=?,fields=?,expires=?,attempts=0 WHERE id=?",crypto.randomUUID(),JSON.stringify(fields[0]),now+25,last.id);
+   else for(const field of fields)sql.exec("INSERT INTO desired_jobs(id,grant_id,fields,expires,phase,barrier,attempts) VALUES(?,?,?,?,'waiting',?,0)",crypto.randomUUID(),grant,JSON.stringify(field),now+25,fields.length>1?1:0);
    return 'accepted';
   });
  }
@@ -56,9 +57,26 @@ export class CommandQueue{
    for(const job of this.rows<Row>('SELECT * FROM desired_jobs ORDER BY seq')){
     if(job.expires<=now){sql.exec('DELETE FROM desired_jobs WHERE id=?',job.id);this.health('EXPIRED',now);continue;}
     sql.exec("UPDATE desired_jobs SET phase='running' WHERE id=?",job.id);
-    return {id:job.id,grant:job.grant_id,fields:JSON.parse(job.fields),expires:job.expires};
+    return {id:job.id,grant:job.grant_id,fields:JSON.parse(job.fields),expires:job.expires,attempts:job.attempts??0};
    }
    return null;
+  });
+ }
+ requeuePreDelivery(job:QueuedCommand,now:number):boolean{
+  return this.state.storage.transactionSync(()=>{
+   const sql=this.state.storage.sql;
+   const row=this.rows<Row>("SELECT * FROM desired_jobs WHERE id=? AND phase='running'",job.id)[0];
+   if(!row)return false;
+   if(Object.hasOwn(job.fields,'brightness')){
+    const waiting=this.rows<Row>("SELECT * FROM desired_jobs WHERE phase='waiting' ORDER BY seq");
+    if(waiting.some(w=>w.seq!>row.seq!&&w.barrier===0&&Object.hasOwn(JSON.parse(w.fields),'brightness'))){
+     sql.exec('DELETE FROM desired_jobs WHERE id=?',row.id);
+     return false;
+    }
+   }
+   if((row.attempts??0)>=1||row.expires-now<9)return false;
+   sql.exec("UPDATE desired_jobs SET id=?,phase='waiting',attempts=? WHERE id=?",crypto.randomUUID(),(row.attempts??0)+1,row.id);
+   return true;
   });
  }
  finish(id:string,outcome:string,now:number){this.state.storage.sql.exec('DELETE FROM desired_jobs WHERE id=?',id);this.health(outcome,now);}
