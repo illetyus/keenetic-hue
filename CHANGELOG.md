@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.0-rc.24 — 2026-11-24
+
+Code commit `cc5daf8`. Eliminated USB flash event-loop and command-path stalls
+across `hue_agent/journal.py`, `hue_agent/agent.py`, `hue_agent/bumble_io.py`,
+and `hue_agent/tunnel_api.py`, plus resilient `/v1/session` handshakes and
+pre-delivery queue retries in `cloud/src/relay.ts`, `cloud/src/protocol.ts`,
+`cloud/src/command-queue.ts`, and `cloud/src/oauth-store.ts`, verified with 57
+targeted agent/journal/crash-recovery tests (`2` POSIX root fixtures skipped on
+Windows), 96 portable Python tests, 15 Cloudflare Worker test files (76
+`vitest` tests + `tsc --noEmit`), `tools/check_publication.py`, and live router
+acceptance on `keenetic-hue-0.2.0-rc.24.huerel` (`healthy: true`,
+`bootstrapInSync: true`, `releaseId: "0.2.0-rc.24"`, `5/5` cloud queries
+`625–890 ms`, `3/3` consecutive `set` commands `1,282–1,313 ms`).
+[Release notes](docs/releases/0.2.0-rc.24.md).
+
+- Moved read-only `query` deduplication, sequence, and conflict tracking into
+  memory and switched `commands.sqlite` to `PRAGMA journal_mode=PERSIST` +
+  `PRAGMA synchronous=FULL` with a dedicated single-worker executor
+  (`hue_agent/journal.py`, `hue_agent/agent.py`), eliminating multi-second
+  `asyncio` event-loop freezes on slow USB flash.
+- Performed fast RAM-first `set` reservation before BLE writes while persisting
+  `commands.sqlite` reservations and completions in FIFO order on the
+  single-worker background thread, cutting live cloud `set` latency from
+  `6,172 ms` to `1,282–1,313 ms`.
+- Added sanitized `ble_disconnected` reason logging and fast BLE-only reconnect
+  on cleanly disconnected `BleIo` sessions with automatic fallback to full USB
+  transport reopen on error (`hue_agent/bumble_io.py`).
+- Relaxed `/v1/session` RTT ceiling to `2.5 s` with one retry, extended `set`
+  command TTL to `7 s` (`8 s` Worker timeout, `9 s` `TunnelController` ceiling),
+  and added one pre-delivery `CLOCK_UNCERTAIN`/`BLE_OFFLINE` retry (skipped if
+  superseded by a newer brightness command; `OUTCOME_UNKNOWN` never retried) in
+  `cloud/src/relay.ts`, `cloud/src/protocol.ts`, `cloud/src/command-queue.ts`,
+  and `cloud/src/oauth-store.ts`.
+
 ## 0.2.0-rc.21 — 2026-11-24
 
 Code commit `9ee27ce`. Hue BLE brightness transition improvements across
