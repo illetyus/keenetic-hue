@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0-rc.25 — 2026-11-24
+
+Code commit `a1713ae`. Bounded `Journal._session_sequences` memory growth and
+clamped pre-NTP future `created` timestamps on startup in `hue_agent/journal.py`,
+verified with `5/5` journal capacity tests (`tests/test_journal_capacity.py`),
+`98/98` portable Python tests (`tools/run_portable_tests.py`),
+`tools/check_publication.py`, and live router acceptance on
+`keenetic-hue-0.2.0-rc.25.huerel` (`healthy: true`, `bootstrapInSync: true`,
+`releaseId: "0.2.0-rc.25"`, `agent: "running"`, `tunnel: "ready"`,
+`localApi: "ready"`, `ble: "ready"`).
+[Release notes](docs/releases/0.2.0-rc.25.md).
+
+- Bounded `Journal._session_sequences` to `_MAX_SESSION_SEQUENCES = 256`
+  entries with `_session_seq_ts` and `1800 s` idle-session pruning in
+  `_prune_memory_locked()` while preserving the active `command.session_id`.
+- Clamped future `created` timestamps in `commands` and `sequences` during
+  `Journal.__init__()` and ordered loaded `sequences` inside the `1800 s`
+  retention window so pre-NTP clock jumps after boot cannot pin stale state
+  (`tests/test_journal_capacity.py`).
+
 ## 0.2.0-rc.24 — 2026-11-24
 
 Code commit `cc5daf8`. Eliminated USB flash event-loop and command-path stalls
